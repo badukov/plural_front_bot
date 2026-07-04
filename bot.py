@@ -7,7 +7,16 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.database import init_db
 from app.import_sp import import_simply_plural_export
-from app.handlers import start, info, admin_front, directory, callbacks
+from app.handlers import (
+    start,
+    info,
+    notifications,
+    admin_front,
+    admin_add,
+    directory,
+    callbacks,
+    global_search,
+)
 
 
 async def main() -> None:
@@ -38,9 +47,12 @@ async def main() -> None:
 
     dp.include_router(start.router)
     dp.include_router(info.router)
+    dp.include_router(notifications.router)
     dp.include_router(admin_front.router)
+    dp.include_router(admin_add.router)
     dp.include_router(directory.router)
     dp.include_router(callbacks.router)
+    dp.include_router(global_search.router)
 
     logging.info("Bot started")
     await dp.start_polling(bot)

@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from app.access import is_admin_message
 from app.broadcast import broadcast
+from app.formatters import format_front_notification
 from app.keyboards import (
     BTN_BLUR,
     BTN_DIRECTORY,
@@ -26,7 +27,7 @@ router = Router()
 async def start_front_search(message: Message, state: FSMContext) -> None:
     if not is_admin_message(message):
         await message.answer(
-            "Вам доступна только информация о фронте.",
+            "Управление фронтом доступно только админам.",
             reply_markup=main_keyboard(False),
         )
         return
@@ -40,7 +41,7 @@ async def process_front_search(message: Message, state: FSMContext) -> None:
     if not is_admin_message(message):
         await state.clear()
         await message.answer(
-            "Вам доступна только информация о фронте.",
+            "Управление фронтом доступно только админам.",
             reply_markup=main_keyboard(False),
         )
         return
@@ -74,7 +75,7 @@ async def process_front_search(message: Message, state: FSMContext) -> None:
 async def remove_front_start(message: Message) -> None:
     if not is_admin_message(message):
         await message.answer(
-            "Вам доступна только информация о фронте.",
+            "Управление фронтом доступно только админам.",
             reply_markup=main_keyboard(False),
         )
         return
@@ -94,11 +95,11 @@ async def remove_front_start(message: Message) -> None:
 async def set_blur(message: Message) -> None:
     if not is_admin_message(message):
         await message.answer(
-            "Вам доступна только информация о фронте.",
+            "Управление фронтом доступно только админам.",
             reply_markup=main_keyboard(False),
         )
         return
 
     await repo.clear_front(created_by=message.from_user.id if message.from_user else None)
-    await broadcast(message.bot, "блюр")
+    await broadcast(message.bot, await format_front_notification("Фронт очищен", []))
     await message.answer("Фронт очищен. Статус: блюр.", reply_markup=main_keyboard(True))

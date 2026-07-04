@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery
 
 from app.access import is_admin_callback
 from app.broadcast import broadcast
-from app.formatters import current_status_text, split_long_message
+from app.formatters import current_status_text, format_front_notification, split_long_message
 from app.repository import repo
 
 
@@ -48,7 +48,10 @@ async def set_front_callback(callback: CallbackQuery) -> None:
     status = current_status_text(front_members)
 
     if added:
-        await broadcast(callback.bot, status)
+        await broadcast(
+            callback.bot,
+            await format_front_notification(f"На фронт: {member['name']}", front_members),
+        )
         answer_text = f"Поставлено на фронт: {member['name']}\n{status}"
     else:
         answer_text = f"{member['name']} уже на фронте.\n{status}"
@@ -79,7 +82,10 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
 
     if removed:
         text = f"{member['name']} снят с фронта\n{status}"
-        await broadcast(callback.bot, text)
+        await broadcast(
+            callback.bot,
+            await format_front_notification(f"{member['name']} снят с фронта", front_members),
+        )
     else:
         text = f"{member['name']} сейчас не на фронте.\n{status}"
 

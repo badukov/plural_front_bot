@@ -23,6 +23,38 @@ def current_status_text(front_members: list[dict[str, Any]]) -> str:
     return f"фронт - {names}"
 
 
+async def format_member_brief(member: dict[str, Any]) -> str:
+    parts: list[str] = []
+    name = _clean_text(member.get("name")) or "Без имени"
+    parts.append(name)
+
+    pronouns = _clean_text(member.get("pronouns")) or "не указаны"
+    parts.append(f"Местоимения: {pronouns}")
+
+    years = await repo.get_category_values_for_member(member["id"], "Years of birth")
+    parts.append(f"Год рождения: {', '.join(years) if years else 'не указан'}")
+
+    roles = await repo.get_category_values_for_member(member["id"], "Roles")
+    parts.append(f"Роль: {', '.join(roles) if roles else 'не указана'}")
+
+    if member.get("is_archived"):
+        parts.append("Архив: да")
+
+    return "\n".join(parts)
+
+
+async def format_members_brief_list(members: list[dict[str, Any]]) -> str:
+    return "\n\n".join([await format_member_brief(member) for member in members])
+
+
+async def format_front_notification(event_text: str, front_members: list[dict[str, Any]]) -> str:
+    status = current_status_text(front_members)
+    if not front_members:
+        return f"{event_text}\n{status}"
+    brief = await format_members_brief_list(front_members)
+    return f"{event_text}\n{status}\n\n{brief}"
+
+
 async def format_member_info(member: dict[str, Any]) -> str:
     raw = json.loads(member.get("raw_json") or "{}")
     categories = await repo.get_categories_for_member(member["id"])

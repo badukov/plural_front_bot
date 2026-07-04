@@ -10,7 +10,7 @@ if not db_path.exists():
 con = sqlite3.connect(db_path)
 cur = con.cursor()
 
-expected_counts = {
+minimum_counts = {
     "members": 632,
     "groups": 179,
     "member_groups": 4752,
@@ -21,9 +21,9 @@ print("Database counts:")
 for table in ["members", "groups", "member_groups", "custom_fields", "front_state", "users", "events"]:
     cur.execute(f"SELECT COUNT(*) FROM {table}")
     count = cur.fetchone()[0]
-    expected = expected_counts.get(table)
-    suffix = f" (expected {expected})" if expected is not None else ""
-    status = " OK" if expected is None or count == expected else " CHECK"
+    expected = minimum_counts.get(table)
+    suffix = f" (minimum {expected})" if expected is not None else ""
+    status = " OK" if expected is None or count >= expected else " CHECK"
     print(f"{table}: {count}{suffix}{status}")
 
 cur.execute("""

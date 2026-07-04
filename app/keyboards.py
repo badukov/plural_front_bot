@@ -14,6 +14,8 @@ BTN_REMOVE_FRONT = "Снять с фронта"
 BTN_BLUR = "Блюр"
 BTN_INFO = "Инфо о фронте"
 BTN_DIRECTORY = "Справочник"
+BTN_NOTIFICATIONS = "Оповещения"
+BTN_ADD_MEMBER = "Добавить личность"
 
 
 def main_keyboard(is_admin: bool) -> ReplyKeyboardMarkup:
@@ -21,10 +23,14 @@ def main_keyboard(is_admin: bool) -> ReplyKeyboardMarkup:
         keyboard = [
             [KeyboardButton(text=BTN_FRONT), KeyboardButton(text=BTN_REMOVE_FRONT)],
             [KeyboardButton(text=BTN_BLUR), KeyboardButton(text=BTN_INFO)],
-            [KeyboardButton(text=BTN_DIRECTORY)],
+            [KeyboardButton(text=BTN_DIRECTORY), KeyboardButton(text=BTN_NOTIFICATIONS)],
+            [KeyboardButton(text=BTN_ADD_MEMBER)],
         ]
     else:
-        keyboard = [[KeyboardButton(text=BTN_INFO), KeyboardButton(text=BTN_DIRECTORY)]]
+        keyboard = [
+            [KeyboardButton(text=BTN_INFO), KeyboardButton(text=BTN_DIRECTORY)],
+            [KeyboardButton(text=BTN_NOTIFICATIONS)],
+        ]
 
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
@@ -76,6 +82,71 @@ def members_choice_keyboard(action: str, members: list[tuple[str, str]]) -> Inli
     ]
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def search_results_keyboard(members: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"Подробнее: {name}", callback_data=f"dir:m:{member_id}")]
+        for member_id, name in member_button_items(members)
+    ]
+    rows.append([InlineKeyboardButton(text="В справочник", callback_data="dir:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_member_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Новая личность", callback_data="add:new")],
+            [InlineKeyboardButton(text="Экспорт JSON", callback_data="add:export")],
+            [InlineKeyboardButton(text="Отмена", callback_data="add:cancel")],
+        ]
+    )
+
+
+def add_choice_keyboard(prefix: str, groups: list[dict[str, Any]], skip_text: str) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=short_button_text(str(group.get("name") or "Без названия")),
+                callback_data=f"{prefix}:{group['id']}",
+            )
+        ]
+        for group in groups
+    ]
+    rows.append([InlineKeyboardButton(text=skip_text, callback_data=f"{prefix}:skip")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_category_keyboard(
+    groups: list[dict[str, Any]],
+    selected_count: int,
+    parent_id: str | None = None,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=short_button_text(str(group.get("name") or "Без названия")),
+                callback_data=f"add:cat:{group['id']}",
+            )
+        ]
+        for group in groups
+    ]
+    if parent_id:
+        rows.append([InlineKeyboardButton(text="Выше", callback_data="add:catup")])
+    rows.append([InlineKeyboardButton(text=f"Готово ({selected_count})", callback_data="add:catdone")])
+    rows.append([InlineKeyboardButton(text="Пропустить категории", callback_data="add:catskip")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_category_selected_keyboard(group_id: str, selected: bool) -> InlineKeyboardMarkup:
+    text = "Убрать из выбранных" if selected else "Добавить категорию"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=text, callback_data=f"add:cattoggle:{group_id}")],
+            [InlineKeyboardButton(text="Открыть вложенные", callback_data=f"add:catopen:{group_id}")],
+            [InlineKeyboardButton(text="Готово", callback_data="add:catdone")],
+        ]
+    )
 
 
 def directory_home_keyboard() -> InlineKeyboardMarkup:

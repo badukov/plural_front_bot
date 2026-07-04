@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -271,6 +272,32 @@ class Repository:
             )
             await db.commit()
 
+    async def get_user(self, telegram_user_id: int) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM users WHERE telegram_user_id=?",
+                (telegram_user_id,),
+            )
+            return _row_to_dict(await cursor.fetchone())
+
+    async def toggle_user_subscribed(self, telegram_user_id: int) -> bool:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT subscribed FROM users WHERE telegram_user_id=?",
+                (telegram_user_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+
+            subscribed = not bool(row["subscribed"])
+            await db.execute(
+                "UPDATE users SET subscribed=?, updated_at=? WHERE telegram_user_id=?",
+                (1 if subscribed else 0, _now_ms(), telegram_user_id),
+            )
+            await db.commit()
+            return subscribed
+
     async def get_subscribed_users(self) -> list[dict[str, Any]]:
         async with self._connect() as db:
             cursor = await db.execute(
@@ -401,6 +428,32 @@ class Repository:
             cursor = await db.execute("SELECT * FROM members WHERE id=?", (member_id,))
             return _row_to_dict(await cursor.fetchone())
 
+    async def get_group_by_name(self, name: str, parent_id: str | None = None) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            if parent_id is None:
+                cursor = await db.execute(
+                    """
+                    SELECT *
+                    FROM groups
+                    WHERE name=? AND (parent_id IS NULL OR parent_id='' OR parent_id='root')
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (name,),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT *
+                    FROM groups
+                    WHERE name=? AND parent_id=?
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (name, parent_id),
+                )
+            return _row_to_dict(await cursor.fetchone())
+
     async def count_all_members(self) -> int:
         async with self._connect() as db:
             cursor = await db.execute("SELECT COUNT(*) AS c FROM members")
@@ -424,6 +477,63 @@ class Repository:
         async with self._connect() as db:
             cursor = await db.execute("SELECT * FROM groups WHERE id=?", (group_id,))
             return _row_to_dict(await cursor.fetchone())
+
+    async def ensure_child_group(
+        self,
+        parent_id: str,
+        name: str,
+        emoji: str = "",
+    ) -> dict[str, Any]:
+        existing = await self.get_group_by_name(name, parent_id=parent_id)
+        if existing:
+            return existing
+
+        group_id = f"local_group_{uuid.uuid4().hex}"
+        raw = {
+            "_id": group_id,
+            "id": group_id,
+            "name": name,
+            "emoji": emoji,
+            "parent": parent_id,
+            "members": [],
+            "private": False,
+            "desc": "",
+        }
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO groups(id, parent_id, name, emoji, description, is_private, raw_json)
+                VALUES (?, ?, ?, ?, '', 0, ?)
+                """,
+                (group_id, parent_id, name, emoji, json.dumps(raw, ensure_ascii=False, sort_keys=True)),
+            )
+            await db.commit()
+
+        group = await self.get_group_by_id(group_id)
+        if group is None:
+            raise RuntimeError("Created group was not found")
+        return group
+
+    async def ensure_future_year_groups(self, years_ahead: int = 10) -> list[dict[str, Any]]:
+        root = await self.get_group_by_name("Years of birth")
+        if not root:
+            return []
+
+        existing = await self.list_child_groups(root["id"], limit=1000)
+        numeric_years: list[int] = []
+        for group in existing:
+            try:
+                numeric_years.append(int(str(group.get("name") or "").strip()))
+            except ValueError:
+                continue
+
+        current_year = time.localtime().tm_year
+        existing_max = max(numeric_years) if numeric_years else current_year - 1
+        target_max = current_year + years_ahead
+        created: list[dict[str, Any]] = []
+        for year in range(existing_max + 1, target_max + 1):
+            created.append(await self.ensure_child_group(root["id"], str(year)))
+        return created
 
     async def list_child_groups(
         self,
@@ -593,6 +703,130 @@ class Repository:
 
         paths = sorted({path_for(group) for group in member_groups if group.get("name")})
         return paths
+
+    async def get_category_values_for_member(self, member_id: str, root_name: str) -> list[str]:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT g.*
+                FROM member_groups mg
+                JOIN groups g ON g.id = mg.group_id
+                WHERE mg.member_id=?
+                """,
+                (member_id,),
+            )
+            member_groups = [dict(row) for row in await cursor.fetchall()]
+
+            cursor = await db.execute("SELECT * FROM groups")
+            all_groups = {row["id"]: dict(row) for row in await cursor.fetchall()}
+
+        values: set[str] = set()
+        for group in member_groups:
+            parts = [self._group_display_name(group)]
+            parent_id = group.get("parent_id")
+            root_found = False
+            guard = 0
+            while parent_id and parent_id != "root" and parent_id in all_groups and guard < 50:
+                parent = all_groups[parent_id]
+                if (parent.get("name") or "").casefold() == root_name.casefold():
+                    root_found = True
+                    break
+                parts.append(self._group_display_name(parent))
+                parent_id = parent.get("parent_id")
+                guard += 1
+
+            if root_found:
+                values.add(" / ".join(reversed([part for part in parts if part])))
+
+        return sorted(values)
+
+    async def create_member(
+        self,
+        name: str,
+        pronouns: str = "",
+        description: str = "",
+        group_ids: list[str] | None = None,
+        created_by: int | None = None,
+    ) -> dict[str, Any]:
+        member_id = f"local_{uuid.uuid4().hex}"
+        now = _now_ms()
+        group_ids = list(dict.fromkeys(group_ids or []))
+        raw = {
+            "_id": member_id,
+            "uid": member_id,
+            "name": name,
+            "pronouns": pronouns,
+            "desc": description,
+            "color": "",
+            "avatarUrl": "",
+            "avatarUuid": "",
+            "pkId": "",
+            "private": False,
+            "archived": False,
+            "buckets": [],
+            "info": {},
+            "lastOperationTime": now,
+        }
+
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO members(
+                    id, name, pronouns, description, color, avatar_url, avatar_uuid,
+                    pk_id, is_private, is_archived, archived_reason, raw_json
+                )
+                VALUES (?, ?, ?, ?, '', '', '', '', 0, 0, '', ?)
+                """,
+                (member_id, name, pronouns, description, json.dumps(raw, ensure_ascii=False, sort_keys=True)),
+            )
+            for group_id in group_ids:
+                await db.execute(
+                    "INSERT OR IGNORE INTO member_groups(member_id, group_id) VALUES (?, ?)",
+                    (member_id, group_id),
+                )
+            await db.execute(
+                """
+                INSERT INTO events(event_type, member_id, created_by, created_at, details_json)
+                VALUES ('member_created', ?, ?, ?, NULL)
+                """,
+                (member_id, created_by, now),
+            )
+            await db.commit()
+
+        member = await self.get_member_by_id(member_id)
+        if member is None:
+            raise RuntimeError("Created member was not found")
+        return member
+
+    async def export_simply_plural_data(self) -> dict[str, Any]:
+        async with self._connect() as db:
+            members_cursor = await db.execute("SELECT raw_json FROM members ORDER BY name COLLATE NOCASE, id")
+            member_rows = await members_cursor.fetchall()
+            groups_cursor = await db.execute("SELECT id, raw_json FROM groups ORDER BY name COLLATE NOCASE, id")
+            group_rows = await groups_cursor.fetchall()
+            fields_cursor = await db.execute("SELECT raw_json FROM custom_fields ORDER BY name COLLATE NOCASE, id")
+            field_rows = await fields_cursor.fetchall()
+            links_cursor = await db.execute(
+                "SELECT member_id, group_id FROM member_groups ORDER BY group_id, member_id"
+            )
+            links = await links_cursor.fetchall()
+
+        members = [json.loads(row["raw_json"] or "{}") for row in member_rows]
+        groups = []
+        members_by_group: dict[str, list[str]] = {}
+        for link in links:
+            members_by_group.setdefault(link["group_id"], []).append(link["member_id"])
+
+        for row in group_rows:
+            group = json.loads(row["raw_json"] or "{}")
+            group["members"] = members_by_group.get(row["id"], [])
+            groups.append(group)
+
+        return {
+            "members": members,
+            "groups": groups,
+            "customFields": [json.loads(row["raw_json"] or "{}") for row in field_rows],
+        }
 
     async def get_custom_fields_map(self) -> dict[str, str]:
         async with self._connect() as db:

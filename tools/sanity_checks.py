@@ -1,6 +1,8 @@
 import asyncio
+import json
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -9,8 +11,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import settings
-from app.formatters import current_status_text, format_front_info, split_long_message
+from app.database import init_db
+from app.formatters import current_status_text, format_front_info, format_member_brief, split_long_message
 from app.keyboards import (
+    add_category_keyboard,
+    add_choice_keyboard,
+    add_member_menu_keyboard,
     directory_categories_keyboard,
     directory_category_keyboard,
     directory_home_keyboard,
@@ -18,7 +24,7 @@ from app.keyboards import (
     member_button_items,
     members_choice_keyboard,
 )
-from app.repository import RU_TO_EN_KEYBOARD, _cyrillic_to_latin, repo
+from app.repository import RU_TO_EN_KEYBOARD, Repository, _cyrillic_to_latin, repo
 
 
 MAX_CALLBACK_DATA_BYTES = 64
@@ -79,6 +85,46 @@ def _first_cyrillic_member() -> dict[str, object] | None:
     row = cur.fetchone()
     con.close()
     return dict(row) if row else None
+
+
+def _member_with_group_root(root_name: str) -> str | None:
+    con = sqlite3.connect(settings.database_path)
+    cur = con.cursor()
+    cur.execute(
+        """
+        WITH RECURSIVE tree(id) AS (
+            SELECT id FROM groups WHERE lower(name)=lower(?)
+            UNION ALL
+            SELECT g.id FROM groups g JOIN tree t ON g.parent_id = t.id
+        )
+        SELECT mg.member_id
+        FROM member_groups mg
+        JOIN tree t ON t.id = mg.group_id
+        LIMIT 1
+        """,
+        (root_name,),
+    )
+    row = cur.fetchone()
+    con.close()
+    return str(row[0]) if row else None
+
+
+def _insert_group(cur, group_id: str, parent_id: str, name: str, emoji: str = "") -> None:
+    raw = {
+        "_id": group_id,
+        "id": group_id,
+        "parent": parent_id,
+        "name": name,
+        "emoji": emoji,
+        "members": [],
+    }
+    cur.execute(
+        """
+        INSERT INTO groups(id, parent_id, name, emoji, description, is_private, raw_json)
+        VALUES (?, ?, ?, ?, '', 0, ?)
+        """,
+        (group_id, parent_id, name, emoji, json.dumps(raw, ensure_ascii=False, sort_keys=True)),
+    )
 
 
 def _assert_callback_data_is_safe(buttons: list[tuple[str, str]]) -> None:
@@ -159,6 +205,11 @@ async def main() -> None:
                 parent_id=group.get("parent_id"),
             )
         )
+        _assert_markup_callback_data_is_safe(add_member_menu_keyboard())
+        _assert_markup_callback_data_is_safe(add_choice_keyboard("add:role", root_groups[:3], "Пропустить"))
+        _assert_markup_callback_data_is_safe(
+            add_category_keyboard(root_groups[:3], selected_count=1, parent_id=None)
+        )
 
     if matches:
         member = await repo.get_member_by_id(str(matches[0]["id"]))
@@ -167,6 +218,18 @@ async def main() -> None:
         _check("categories lookup must return a list", isinstance(categories, list))
         mention = await repo.replace_member_mentions(f"<###@{matches[0]['id']}###>")
         _check("known Simply Plural mention must be replaced", not mention.startswith("<###@"))
+
+    year_member_id = _member_with_group_root("Years of birth")
+    if year_member_id:
+        member = await repo.get_member_by_id(year_member_id)
+        brief = await format_member_brief(member)
+        _check("brief card should include year from category tree", "Год рождения: не указан" not in brief)
+
+    role_member_id = _member_with_group_root("Roles")
+    if role_member_id:
+        member = await repo.get_member_by_id(role_member_id)
+        brief = await format_member_brief(member)
+        _check("brief card should include role from category tree", "Роль: не указана" not in brief)
 
     cyrillic_member = _first_cyrillic_member()
     if cyrillic_member:
@@ -194,6 +257,47 @@ async def main() -> None:
         labels = [label for _, label in duplicate_buttons]
         _check("duplicate member names must get distinguishable button labels", len(labels) == len(set(labels)))
         _assert_callback_data_is_safe(duplicate_buttons)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "bot.sqlite3"
+        await init_db(db_path)
+        temp_repo = Repository(db_path)
+
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        _insert_group(cur, "years", "root", "Years of birth", "🕰️")
+        _insert_group(cur, "year2026", "years", "2026")
+        _insert_group(cur, "roles", "root", "Roles", "💼")
+        _insert_group(cur, "role1", "roles", "Test role", "💼")
+        con.commit()
+        con.close()
+
+        created_years = await temp_repo.ensure_future_year_groups()
+        _check("future year groups should be created on temp database", bool(created_years))
+
+        member = await temp_repo.create_member(
+            name="Temporary Test Member",
+            pronouns="they/them",
+            description="",
+            group_ids=["year2026", "role1"],
+            created_by=1,
+        )
+        found = await temp_repo.search_members("Temporary Test", limit=5)
+        _check(
+            "created member should be searchable",
+            any(row["id"] == member["id"] for row in found),
+        )
+
+        await temp_repo.upsert_user(telegram_user_id=1, chat_id=1, username=None, first_name=None, is_admin=True)
+        subscribed = await temp_repo.toggle_user_subscribed(1)
+        _check("toggle should disable initially subscribed user", subscribed is False)
+        subscribed = await temp_repo.toggle_user_subscribed(1)
+        _check("toggle should enable disabled user", subscribed is True)
+
+        export = await temp_repo.export_simply_plural_data()
+        _check("export should contain created member", len(export["members"]) == 1)
+        exported_group = next(group for group in export["groups"] if group.get("_id") == "role1")
+        _check("export should restore group members links", member["id"] in exported_group.get("members", []))
 
     print("Sanity checks passed.")
     print(
