@@ -4,8 +4,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.config import settings
 from app.formatters import format_member_info, split_long_message
+from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
-    BTN_DIRECTORY,
     directory_categories_keyboard,
     directory_category_keyboard,
     directory_home_keyboard,
@@ -59,51 +59,55 @@ async def _show_chunks(
         )
 
 
-@router.message(lambda message: message.text == BTN_DIRECTORY)
+@router.message(lambda message: is_button_text(message.text, "directory"))
 async def open_directory(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
     await state.clear()
     await message.answer(
-        "Справочник: выберите способ просмотра.",
-        reply_markup=directory_home_keyboard(),
+        t("directory_home", lang),
+        reply_markup=directory_home_keyboard(lang),
     )
 
 
 @router.callback_query(lambda callback: callback.data == "dir:home")
 async def directory_home(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     await state.clear()
     await callback.answer()
     await _edit_or_answer(
         callback,
-        "Справочник: выберите способ просмотра.",
-        reply_markup=directory_home_keyboard(),
+        t("directory_home", lang),
+        reply_markup=directory_home_keyboard(lang),
     )
 
 
 @router.callback_query(lambda callback: callback.data == "dir:search")
 async def directory_search_start(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     await state.set_state(DirectorySearchState.waiting_for_query)
     await callback.answer()
-    await _edit_or_answer(callback, "Введите имя или часть имени личности.")
+    await _edit_or_answer(callback, t("enter_name", lang))
 
 
 @router.message(DirectorySearchState.waiting_for_query)
 async def directory_search(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
     query = (message.text or "").strip()
-    if query == BTN_DIRECTORY:
+    if is_button_text(query, "directory"):
         await open_directory(message, state)
         return
     if not query:
-        await message.answer("Введите хотя бы часть имени.")
+        await message.answer(t("enter_some_name", lang))
         return
 
     matches = await repo.search_members(query, limit=settings.search_limit)
     if not matches:
-        await message.answer("Ничего не найдено. Попробуйте другой кусок имени.")
+        await message.answer(t("nothing_found", lang))
         return
 
     await state.clear()
     await message.answer(
-        f"Найдено вариантов: {len(matches)}",
+        t("found_count", lang, count=len(matches)),
         reply_markup=directory_members_keyboard(
             members=matches,
             page=0,
@@ -111,12 +115,14 @@ async def directory_search(message: Message, state: FSMContext) -> None:
             has_next=False,
             page_callback_prefix="dir:search",
             back_callback_data="dir:home",
+            lang=lang,
         ),
     )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:cats:"))
 async def directory_categories(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     page = _safe_page(callback.data.rsplit(":", 1)[-1] if callback.data else "0")
     total = await repo.count_child_groups(parent_id=None)
     offset = page * CATEGORY_PAGE_SIZE
@@ -136,7 +142,10 @@ async def directory_categories(callback: CallbackQuery) -> None:
         )
 
     await callback.answer()
-    text = f"Категории\nПоказано {min(offset + 1, total)}-{min(offset + len(groups), total)} из {total}"
+    text = (
+        f"{t('categories', lang)}\n"
+        f"{t('shown_range', lang, start=min(offset + 1, total), end=min(offset + len(groups), total), total=total)}"
+    )
     await _edit_or_answer(
         callback,
         text,
@@ -145,22 +154,24 @@ async def directory_categories(callback: CallbackQuery) -> None:
             page=page,
             has_prev=page > 0,
             has_next=offset + CATEGORY_PAGE_SIZE < total,
+            lang=lang,
         ),
     )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:cat:"))
 async def directory_category(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     parts = (callback.data or "").split(":")
     if len(parts) < 4:
-        await callback.answer("Категория не найдена", show_alert=True)
+        await callback.answer(t("category_not_found", lang), show_alert=True)
         return
 
     group_id = parts[2]
     page = _safe_page(parts[3])
     group = await repo.get_group_by_id(group_id)
     if not group:
-        await callback.answer("Категория не найдена", show_alert=True)
+        await callback.answer(t("category_not_found", lang), show_alert=True)
         return
 
     total_children = await repo.count_child_groups(parent_id=group_id)
@@ -182,9 +193,9 @@ async def directory_category(callback: CallbackQuery) -> None:
     path = await repo.get_group_path(group_id)
     members_count = await repo.count_members_for_group_tree(group_id)
     text = (
-        f"Категория:\n{path}\n\n"
-        f"Вложенных категорий: {total_children}\n"
-        f"Личностей здесь и ниже: {members_count}"
+        f"{t('category_title', lang)}:\n{path}\n\n"
+        f"{t('child_categories', lang, count=total_children)}\n"
+        f"{t('members_here', lang, count=members_count)}"
     )
 
     await callback.answer()
@@ -199,12 +210,14 @@ async def directory_category(callback: CallbackQuery) -> None:
             has_next=offset + CATEGORY_PAGE_SIZE < total_children,
             members_count=members_count,
             parent_id=group.get("parent_id"),
+            lang=lang,
         ),
     )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:all:"))
 async def directory_all_members(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     page = _safe_page(callback.data.rsplit(":", 1)[-1] if callback.data else "0")
     total = await repo.count_all_members()
     offset = page * MEMBER_PAGE_SIZE
@@ -216,7 +229,10 @@ async def directory_all_members(callback: CallbackQuery) -> None:
         members = await repo.get_all_members_page(limit=MEMBER_PAGE_SIZE, offset=offset)
 
     await callback.answer()
-    text = f"Все личности\nПоказано {min(offset + 1, total)}-{min(offset + len(members), total)} из {total}"
+    text = (
+        f"{t('all_members', lang)}\n"
+        f"{t('shown_range', lang, start=min(offset + 1, total), end=min(offset + len(members), total), total=total)}"
+    )
     await _edit_or_answer(
         callback,
         text,
@@ -227,22 +243,24 @@ async def directory_all_members(callback: CallbackQuery) -> None:
             has_next=offset + MEMBER_PAGE_SIZE < total,
             page_callback_prefix="dir:all",
             back_callback_data="dir:home",
+            lang=lang,
         ),
     )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:list:"))
 async def directory_group_members(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     parts = (callback.data or "").split(":")
     if len(parts) < 4:
-        await callback.answer("Категория не найдена", show_alert=True)
+        await callback.answer(t("category_not_found", lang), show_alert=True)
         return
 
     group_id = parts[2]
     page = _safe_page(parts[3])
     group = await repo.get_group_by_id(group_id)
     if not group:
-        await callback.answer("Категория не найдена", show_alert=True)
+        await callback.answer(t("category_not_found", lang), show_alert=True)
         return
 
     total = await repo.count_members_for_group_tree(group_id)
@@ -262,7 +280,7 @@ async def directory_group_members(callback: CallbackQuery) -> None:
         )
 
     path = await repo.get_group_path(group_id)
-    text = f"{path}\nПоказано {min(offset + 1, total)}-{min(offset + len(members), total)} из {total}"
+    text = f"{path}\n{t('shown_range', lang, start=min(offset + 1, total), end=min(offset + len(members), total), total=total)}"
 
     await callback.answer()
     await _edit_or_answer(
@@ -275,18 +293,20 @@ async def directory_group_members(callback: CallbackQuery) -> None:
             has_next=offset + MEMBER_PAGE_SIZE < total,
             page_callback_prefix=f"dir:list:{group_id}",
             back_callback_data=f"dir:cat:{group_id}:0",
+            lang=lang,
         ),
     )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:m:"))
 async def directory_member_info(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     member_id = (callback.data or "")[len("dir:m:") :]
     member = await repo.get_member_by_id(member_id)
     if not member:
-        await callback.answer("Личность не найдена", show_alert=True)
+        await callback.answer(t("member_not_found", lang), show_alert=True)
         return
 
     await callback.answer()
-    text = await format_member_info(member)
-    await _show_chunks(callback, text, reply_markup=directory_home_keyboard())
+    text = await format_member_info(member, lang)
+    await _show_chunks(callback, text, reply_markup=directory_home_keyboard(lang))

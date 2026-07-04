@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 from app.access import is_admin_callback
 from app.broadcast import broadcast
 from app.formatters import current_status_text, format_front_notification, split_long_message
+from app.i18n import lang_from_callback, t
 from app.repository import repo
 
 
@@ -22,21 +23,23 @@ async def _show_callback_result(callback: CallbackQuery, text: str) -> None:
 
 @router.callback_query(lambda callback: callback.data == "cancel")
 async def cancel(callback: CallbackQuery) -> None:
-    await callback.answer("Отменено")
+    lang = lang_from_callback(callback)
+    await callback.answer(t("cancelled_answer", lang))
     if callback.message:
-        await callback.message.edit_text("Отменено.")
+        await callback.message.edit_text(t("cancelled", lang))
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("setfront:"))
 async def set_front_callback(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     member_id = callback.data.split(":", 1)[1]
     member = await repo.get_member_by_id(member_id)
     if not member:
-        await callback.answer("Личность не найдена", show_alert=True)
+        await callback.answer(t("member_not_found", lang), show_alert=True)
         return
 
     added = await repo.add_to_front(
@@ -45,31 +48,32 @@ async def set_front_callback(callback: CallbackQuery) -> None:
     )
 
     front_members = await repo.get_current_front_members()
-    status = current_status_text(front_members)
+    status = current_status_text(front_members, lang)
 
     if added:
         await broadcast(
             callback.bot,
-            await format_front_notification(f"На фронт: {member['name']}", front_members),
+            await format_front_notification(t("front_added_event", lang, name=member["name"]), front_members, lang),
         )
-        answer_text = f"Поставлено на фронт: {member['name']}\n{status}"
+        answer_text = t("front_added", lang, name=member["name"], status=status)
     else:
-        answer_text = f"{member['name']} уже на фронте.\n{status}"
+        answer_text = t("already_front", lang, name=member["name"], status=status)
 
-    await callback.answer("Готово")
+    await callback.answer(t("ready", lang))
     await _show_callback_result(callback, answer_text)
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("rmfront:"))
 async def remove_front_callback(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     member_id = callback.data.split(":", 1)[1]
     member = await repo.get_member_by_id(member_id)
     if not member:
-        await callback.answer("Личность не найдена", show_alert=True)
+        await callback.answer(t("member_not_found", lang), show_alert=True)
         return
 
     removed = await repo.remove_from_front(
@@ -78,16 +82,16 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
     )
 
     front_members = await repo.get_current_front_members()
-    status = current_status_text(front_members)
+    status = current_status_text(front_members, lang)
 
     if removed:
-        text = f"{member['name']} снят с фронта\n{status}"
+        text = t("front_removed", lang, name=member["name"], status=status)
         await broadcast(
             callback.bot,
-            await format_front_notification(f"{member['name']} снят с фронта", front_members),
+            await format_front_notification(t("front_removed_event", lang, name=member["name"]), front_members, lang),
         )
     else:
-        text = f"{member['name']} сейчас не на фронте.\n{status}"
+        text = t("not_in_front", lang, name=member["name"], status=status)
 
-    await callback.answer("Готово")
+    await callback.answer(t("ready", lang))
     await _show_callback_result(callback, text)

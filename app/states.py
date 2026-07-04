@@ -16,3 +16,7 @@ class AddMemberState(StatesGroup):
     choosing_year = State()
     choosing_role = State()
     choosing_categories = State()
+
+
+class DeleteMemberState(StatesGroup):
+    waiting_for_query = State()

@@ -7,27 +7,31 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
+from app.config import settings
 from app.formatters import format_member_brief
+from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
-    BTN_ADD_MEMBER,
     add_category_keyboard,
     add_category_selected_keyboard,
     add_choice_keyboard,
     add_member_menu_keyboard,
+    delete_confirm_keyboard,
+    delete_results_keyboard,
     main_keyboard,
 )
 from app.repository import repo
-from app.states import AddMemberState
+from app.states import AddMemberState, DeleteMemberState
 
 
 router = Router()
 
 
 def _is_skip(text: str) -> bool:
-    return text.strip().casefold() in {"-", "skip", "пропустить", "нет"}
+    return text.strip().casefold() in {"-", "skip", "пропустить", "нет", "salta", "no"}
 
 
 async def _send_year_choice(message_or_callback: Message | CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(message_or_callback) if isinstance(message_or_callback, CallbackQuery) else lang_from_message(message_or_callback)
     await state.set_state(AddMemberState.choosing_year)
     await repo.ensure_future_year_groups()
     root = await repo.get_group_by_name("Years of birth")
@@ -40,8 +44,8 @@ async def _send_year_choice(message_or_callback: Message | CallbackQuery, state:
             return (99999, str(group.get("name") or ""))
 
     groups = sorted(groups, key=year_key)
-    markup = add_choice_keyboard("add:year", groups, "Пропустить год")
-    text = "Выберите год рождения:"
+    markup = add_choice_keyboard("add:year", groups, t("skip_year", lang), lang)
+    text = t("choose_year", lang)
     if isinstance(message_or_callback, CallbackQuery):
         await message_or_callback.answer()
         if message_or_callback.message:
@@ -51,6 +55,7 @@ async def _send_year_choice(message_or_callback: Message | CallbackQuery, state:
 
 
 async def _send_role_choice(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     await state.set_state(AddMemberState.choosing_role)
     root = await repo.get_group_by_name("Roles")
     groups = []
@@ -68,8 +73,8 @@ async def _send_role_choice(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
         await callback.message.edit_text(
-            "Выберите роль:",
-            reply_markup=add_choice_keyboard("add:role", groups, "Пропустить роль"),
+            t("choose_role", lang),
+            reply_markup=add_choice_keyboard("add:role", groups, t("skip_role", lang), lang),
         )
 
 
@@ -78,6 +83,7 @@ async def _send_category_browser(
     state: FSMContext,
     parent_id: str | None = None,
 ) -> None:
+    lang = lang_from_callback(callback)
     await state.set_state(AddMemberState.choosing_categories)
     data = await state.get_data()
     selected = list(data.get("category_ids") or [])
@@ -86,21 +92,23 @@ async def _send_category_browser(
     await callback.answer()
     if callback.message:
         await callback.message.edit_text(
-            "Выберите дополнительные категории или нажмите «Готово».",
+            t("choose_categories", lang),
             reply_markup=add_category_keyboard(
                 groups=groups,
                 selected_count=len(selected),
                 parent_id=parent_id,
+                lang=lang,
             ),
         )
 
 
 async def _finish_member(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     data = await state.get_data()
     name = str(data.get("name") or "").strip()
     if not name:
         await state.clear()
-        await callback.answer("Имя потерялось, начните заново", show_alert=True)
+        await callback.answer(t("name_lost", lang), show_alert=True)
         return
 
     group_ids = []
@@ -118,64 +126,144 @@ async def _finish_member(callback: CallbackQuery, state: FSMContext) -> None:
         created_by=callback.from_user.id if callback.from_user else None,
     )
     await state.clear()
-    await callback.answer("Личность добавлена")
+    await callback.answer(t("member_added_answer", lang))
     if callback.message:
-        brief = await format_member_brief(member)
-        await callback.message.edit_text(f"Личность добавлена:\n\n{brief}")
+        brief = await format_member_brief(member, lang)
+        await callback.message.edit_text(t("member_added", lang, brief=brief))
 
 
-@router.message(lambda message: message.text == BTN_ADD_MEMBER)
+@router.message(lambda message: is_button_text(message.text, "add_member"))
 async def add_member_menu(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
     if not is_admin_message(message):
         await message.answer(
-            "Управление фронтом доступно только админам.",
-            reply_markup=main_keyboard(False),
+            t("admin_only", lang),
+            reply_markup=main_keyboard(False, lang),
         )
         return
 
     await state.clear()
-    await message.answer("Меню добавления:", reply_markup=add_member_menu_keyboard())
+    await message.answer(t("add_menu", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data == "add:cancel")
 async def add_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     await state.clear()
-    await callback.answer("Отменено")
+    await callback.answer(t("cancelled_answer", lang))
     if callback.message:
-        await callback.message.edit_text("Отменено.")
+        await callback.message.edit_text(t("cancelled", lang))
 
 
 @router.callback_query(lambda callback: callback.data == "add:new")
 async def add_new_member(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     await state.clear()
     await state.set_state(AddMemberState.waiting_for_name)
     await callback.answer()
     if callback.message:
-        await callback.message.edit_text("Введите имя новой личности:")
+        await callback.message.edit_text(t("enter_new_name", lang))
+
+
+@router.callback_query(lambda callback: callback.data == "add:delete")
+async def delete_member_start(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    await state.clear()
+    await state.set_state(DeleteMemberState.waiting_for_query)
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(t("delete_prompt", lang))
+
+
+@router.message(DeleteMemberState.waiting_for_query)
+async def delete_member_search(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
+    if not is_admin_message(message):
+        await state.clear()
+        return
+
+    query = (message.text or "").strip()
+    if not query:
+        await message.answer(t("enter_some_name", lang))
+        return
+
+    matches = await repo.search_members(query, limit=settings.search_limit)
+    if not matches:
+        await message.answer(t("nothing_found", lang))
+        return
+
+    await state.clear()
+    await message.answer(t("choose_delete", lang), reply_markup=delete_results_keyboard(matches, lang))
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("del:ask:"))
+async def delete_member_ask(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    member_id = (callback.data or "").split(":", 2)[2]
+    member = await repo.get_member_by_id(member_id)
+    if not member:
+        await callback.answer(t("member_not_found", lang), show_alert=True)
+        return
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(
+            t("delete_confirm", lang, name=member["name"]),
+            reply_markup=delete_confirm_keyboard(member_id, lang),
+        )
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("del:confirm:"))
+async def delete_member_confirm(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    member_id = (callback.data or "").split(":", 2)[2]
+    member = await repo.get_member_by_id(member_id)
+    if not member:
+        await callback.answer(t("member_not_found", lang), show_alert=True)
+        return
+
+    await repo.logical_delete_member(member_id, callback.from_user.id if callback.from_user else None)
+    await callback.answer(t("ready", lang))
+    if callback.message:
+        await callback.message.edit_text(t("deleted", lang, name=member["name"]))
 
 
 @router.message(AddMemberState.waiting_for_name)
 async def add_member_name(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
     if not is_admin_message(message):
         await state.clear()
         return
 
     name = (message.text or "").strip()
     if not name or _is_skip(name):
-        await message.answer("Имя обязательно. Введите имя новой личности:")
+        await message.answer(t("name_required", lang))
         return
 
     await state.update_data(name=name)
     await state.set_state(AddMemberState.waiting_for_pronouns)
-    await message.answer("Введите местоимения или «-», чтобы пропустить:")
+    await message.answer(t("enter_pronouns", lang))
 
 
 @router.message(AddMemberState.waiting_for_pronouns)
 async def add_member_pronouns(message: Message, state: FSMContext) -> None:
+    lang = lang_from_message(message)
     if not is_admin_message(message):
         await state.clear()
         return
@@ -183,7 +271,7 @@ async def add_member_pronouns(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     await state.update_data(pronouns="" if _is_skip(text) else text)
     await state.set_state(AddMemberState.waiting_for_description)
-    await message.answer("Введите описание или «-», чтобы пропустить:")
+    await message.answer(t("enter_description", lang))
 
 
 @router.message(AddMemberState.waiting_for_description)
@@ -199,8 +287,9 @@ async def add_member_description(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("add:year:"))
 async def add_member_year(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     value = (callback.data or "").split(":", 2)[2]
@@ -210,8 +299,9 @@ async def add_member_year(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("add:role:"))
 async def add_member_role(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     value = (callback.data or "").split(":", 2)[2]
@@ -221,14 +311,15 @@ async def add_member_role(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("add:cat:"))
 async def add_member_category_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     group_id = (callback.data or "").split(":", 2)[2]
     group = await repo.get_group_by_id(group_id)
     if not group:
-        await callback.answer("Категория не найдена", show_alert=True)
+        await callback.answer(t("category_not_found", lang), show_alert=True)
         return
 
     data = await state.get_data()
@@ -237,15 +328,16 @@ async def add_member_category_pick(callback: CallbackQuery, state: FSMContext) -
     await callback.answer()
     if callback.message:
         await callback.message.edit_text(
-            f"Категория:\n{path}",
-            reply_markup=add_category_selected_keyboard(group_id, group_id in selected),
+            f"{t('category_title', lang)}:\n{path}",
+            reply_markup=add_category_selected_keyboard(group_id, group_id in selected, lang),
         )
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("add:cattoggle:"))
 async def add_member_category_toggle(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     group_id = (callback.data or "").split(":", 2)[2]
@@ -256,14 +348,15 @@ async def add_member_category_toggle(callback: CallbackQuery, state: FSMContext)
     else:
         selected.add(group_id)
     await state.update_data(category_ids=sorted(selected))
-    await callback.answer("Обновлено")
+    await callback.answer(t("updated", lang))
     await _send_category_browser(callback, state, data.get("category_parent_id"))
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("add:catopen:"))
 async def add_member_category_open(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     group_id = (callback.data or "").split(":", 2)[2]
@@ -283,8 +376,9 @@ async def add_member_category_up(callback: CallbackQuery, state: FSMContext) -> 
 
 @router.callback_query(lambda callback: callback.data in {"add:catdone", "add:catskip"})
 async def add_member_categories_done(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     if callback.data == "add:catskip":
@@ -294,8 +388,9 @@ async def add_member_categories_done(callback: CallbackQuery, state: FSMContext)
 
 @router.callback_query(lambda callback: callback.data == "add:export")
 async def export_json(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
     if not is_admin_callback(callback):
-        await callback.answer("Недостаточно прав", show_alert=True)
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
     data = await repo.export_simply_plural_data()
@@ -311,11 +406,11 @@ async def export_json(callback: CallbackQuery) -> None:
             json.dump(data, tmp, ensure_ascii=False, indent=2)
             tmp_path = tmp.name
 
-        await callback.answer("Экспорт готов")
+        await callback.answer(t("export_ready", lang))
         if callback.message:
             await callback.message.answer_document(
                 FSInputFile(tmp_path, filename="plural_front_export.json"),
-                caption="Экспорт текущей базы.",
+                caption=t("export_caption", lang),
             )
     finally:
         if tmp_path:

@@ -15,6 +15,7 @@ from app.config import settings
 
 MENTION_RE = re.compile(r"<###@([^#<>]+)###>")
 SEARCH_SPLIT_RE = re.compile(r"[^0-9a-zа-яё]+", re.IGNORECASE)
+DELETED_GROUP_NAMES = {"deleted", "trash", "удаленные", "удалённые", "удалено"}
 
 EN_TO_RU_KEYBOARD_MAP = {
     "q": "й",
@@ -332,6 +333,9 @@ class Repository:
             )
             rows = [dict(row) for row in await cursor.fetchall()]
 
+        deleted_ids = await self.get_deleted_member_ids()
+        rows = [row for row in rows if row["id"] not in deleted_ids]
+
         if not query_norm:
             return rows[:limit]
 
@@ -454,24 +458,37 @@ class Repository:
                 )
             return _row_to_dict(await cursor.fetchone())
 
+    async def find_deleted_group(self) -> dict[str, Any] | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM groups ORDER BY parent_id IS NOT NULL, name COLLATE NOCASE"
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+        for row in rows:
+            if (row.get("name") or "").strip().casefold() in DELETED_GROUP_NAMES:
+                return row
+        return None
+
     async def count_all_members(self) -> int:
+        deleted_ids = await self.get_deleted_member_ids()
         async with self._connect() as db:
             cursor = await db.execute("SELECT COUNT(*) AS c FROM members")
             row = await cursor.fetchone()
-            return int(row["c"])
+            return max(0, int(row["c"]) - len(deleted_ids))
 
     async def get_all_members_page(self, limit: int, offset: int = 0) -> list[dict[str, Any]]:
+        deleted_ids = await self.get_deleted_member_ids()
         async with self._connect() as db:
             cursor = await db.execute(
                 """
                 SELECT id, name, pronouns, is_private, is_archived
                 FROM members
                 ORDER BY name COLLATE NOCASE, id
-                LIMIT ? OFFSET ?
                 """,
-                (limit, offset),
             )
-            return [dict(row) for row in await cursor.fetchall()]
+            rows = [dict(row) for row in await cursor.fetchall()]
+        rows = [row for row in rows if row["id"] not in deleted_ids]
+        return rows[offset:offset + limit]
 
     async def get_group_by_id(self, group_id: str) -> dict[str, Any] | None:
         async with self._connect() as db:
@@ -513,6 +530,74 @@ class Repository:
         if group is None:
             raise RuntimeError("Created group was not found")
         return group
+
+    async def ensure_deleted_group(self) -> dict[str, Any]:
+        existing = await self.find_deleted_group()
+        if existing:
+            return existing
+
+        group_id = f"local_group_{uuid.uuid4().hex}"
+        raw = {
+            "_id": group_id,
+            "id": group_id,
+            "name": "Deleted",
+            "emoji": "🗑️",
+            "parent": "root",
+            "members": [],
+            "private": False,
+            "desc": "",
+        }
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO groups(id, parent_id, name, emoji, description, is_private, raw_json)
+                VALUES (?, 'root', 'Deleted', '🗑️', '', 0, ?)
+                """,
+                (group_id, json.dumps(raw, ensure_ascii=False, sort_keys=True)),
+            )
+            await db.commit()
+
+        group = await self.get_group_by_id(group_id)
+        if group is None:
+            raise RuntimeError("Created deleted group was not found")
+        return group
+
+    async def get_deleted_member_ids(self) -> set[str]:
+        deleted_group = await self.find_deleted_group()
+        if not deleted_group:
+            return set()
+        group_ids = await self.get_descendant_group_ids(deleted_group["id"])
+        if not group_ids:
+            return set()
+        placeholders = ",".join("?" for _ in group_ids)
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT DISTINCT member_id FROM member_groups WHERE group_id IN ({placeholders})",
+                group_ids,
+            )
+            return {row["member_id"] for row in await cursor.fetchall()}
+
+    async def logical_delete_member(self, member_id: str, created_by: int | None) -> bool:
+        member = await self.get_member_by_id(member_id)
+        if not member:
+            return False
+        deleted_group = await self.ensure_deleted_group()
+        now = _now_ms()
+        async with self._connect() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO member_groups(member_id, group_id) VALUES (?, ?)",
+                (member_id, deleted_group["id"]),
+            )
+            await db.execute("DELETE FROM front_state WHERE member_id=?", (member_id,))
+            await db.execute(
+                """
+                INSERT INTO events(event_type, member_id, created_by, created_at, details_json)
+                VALUES ('member_deleted', ?, ?, ?, NULL)
+                """,
+                (member_id, created_by, now),
+            )
+            await db.commit()
+        return True
 
     async def ensure_future_year_groups(self, years_ahead: int = 10) -> list[dict[str, Any]]:
         root = await self.get_group_by_name("Years of birth")

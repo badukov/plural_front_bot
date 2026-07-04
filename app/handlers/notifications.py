@@ -2,18 +2,20 @@ from aiogram import Router
 from aiogram.types import Message
 
 from app.access import is_admin_message
-from app.keyboards import BTN_NOTIFICATIONS, main_keyboard
+from app.i18n import is_button_text, lang_from_message, t
+from app.keyboards import main_keyboard
 from app.repository import repo
 
 
 router = Router()
 
 
-@router.message(lambda message: message.text == BTN_NOTIFICATIONS)
+@router.message(lambda message: is_button_text(message.text, "notifications"))
 async def toggle_notifications(message: Message) -> None:
     if message.from_user is None:
         return
 
+    lang = lang_from_message(message)
     user = await repo.get_user(message.from_user.id)
     if user is None:
         await repo.upsert_user(
@@ -25,9 +27,5 @@ async def toggle_notifications(message: Message) -> None:
         )
 
     subscribed = await repo.toggle_user_subscribed(message.from_user.id)
-    text = (
-        "Оповещения о смене фронта включены."
-        if subscribed
-        else "Оповещения о смене фронта выключены."
-    )
-    await message.answer(text, reply_markup=main_keyboard(is_admin_message(message)))
+    text = t("notifications_on" if subscribed else "notifications_off", lang)
+    await message.answer(text, reply_markup=main_keyboard(is_admin_message(message), lang))

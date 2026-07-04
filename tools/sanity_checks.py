@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.config import settings
 from app.database import init_db
 from app.formatters import current_status_text, format_front_info, format_member_brief, split_long_message
+from app.i18n import all_button_texts, button_text, is_button_text, normalize_lang
 from app.keyboards import (
     add_category_keyboard,
     add_choice_keyboard,
@@ -146,6 +147,11 @@ async def main() -> None:
     _check("groups table should not be empty", counts["groups"] > 0)
     _check("member_groups table should not be empty", counts["member_groups"] > 0)
     _check("custom_fields table should not be empty", counts["custom_fields"] > 0)
+    _check("english language code should normalize", normalize_lang("en-US") == "en")
+    _check("italian language code should normalize", normalize_lang("it") == "it")
+    _check("unknown language should fall back to russian", normalize_lang("de") == "ru")
+    _check("localized front button should match", is_button_text(button_text("front", "en"), "front"))
+    _check("button registry should include italian notifications", button_text("notifications", "it") in all_button_texts())
 
     front_members = await repo.get_current_front_members()
     status = current_status_text(front_members)
@@ -298,6 +304,16 @@ async def main() -> None:
         _check("export should contain created member", len(export["members"]) == 1)
         exported_group = next(group for group in export["groups"] if group.get("_id") == "role1")
         _check("export should restore group members links", member["id"] in exported_group.get("members", []))
+
+        deleted = await temp_repo.logical_delete_member(member["id"], created_by=1)
+        _check("logical delete should succeed", deleted)
+        deleted_group = await temp_repo.find_deleted_group()
+        _check("logical delete should create or find deleted group", deleted_group is not None)
+        after_delete = await temp_repo.search_members("Temporary Test", limit=5)
+        _check(
+            "logically deleted member should be hidden from default search",
+            all(row["id"] != member["id"] for row in after_delete),
+        )
 
     print("Sanity checks passed.")
     print(
