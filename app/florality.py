@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -24,16 +24,29 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class FloralityImportResult:
-    created: int = 0
-    updated: int = 0
+    imported_front_names: tuple[str, ...] = field(default_factory=tuple)
+    changed_names: tuple[str, ...] = field(default_factory=tuple)
+    missing_local_names: tuple[str, ...] = field(default_factory=tuple)
+    missing_remote_names: tuple[str, ...] = field(default_factory=tuple)
     unchanged: int = 0
-    deleted: int = 0
     skipped: int = 0
     backup_path: str = ""
 
     @property
-    def total(self) -> int:
-        return self.created + self.updated + self.unchanged + self.deleted + self.skipped
+    def imported_front(self) -> int:
+        return len(self.imported_front_names)
+
+    @property
+    def changed(self) -> int:
+        return len(self.changed_names)
+
+    @property
+    def missing_local(self) -> int:
+        return len(self.missing_local_names)
+
+    @property
+    def missing_remote(self) -> int:
+        return len(self.missing_remote_names)
 
 
 def _normalized_name(value: object) -> str:
@@ -193,25 +206,48 @@ class FloralityClient:
         if remote_members is None:
             return FloralityImportResult(skipped=1)
 
-        backup_path = await create_database_backup("florality_import")
-        logger.info("Database backup created before Florality import: %s", backup_path.name)
-
-        counts = {"created": 0, "updated": 0, "unchanged": 0, "deleted": 0, "skipped": 0}
+        remote_front_members = await self.get_front()
+        remote_front_ids = {
+            remote_id
+            for member in remote_front_members or []
+            if (remote_id := _remote_member_id(member))
+        }
+        backup_path = ""
+        imported_front_names: list[str] = []
+        changed_names: list[str] = []
+        missing_local_names: list[str] = []
+        missing_remote_names: list[str] = []
+        unchanged = 0
+        skipped = 0
         active_remote_ids: set[str] = set()
+
         for remote_member in remote_members:
             remote_id = _remote_member_id(remote_member)
             if not remote_id:
-                counts["skipped"] += 1
+                skipped += 1
                 continue
             active_remote_ids.add(remote_id)
-            try:
-                _member, action = await repo.upsert_florality_member(remote_member, remote_id)
-                counts[action] += 1
-            except ValueError:
-                counts["skipped"] += 1
-            except Exception:
-                counts["skipped"] += 1
-                logger.exception("Unexpected Florality member import error")
+
+            name = str(remote_member.get("name") or remote_member.get("displayName") or remote_id).strip()
+            _local_member, action = await repo.compare_florality_member(remote_member, remote_id)
+            if action == "unchanged":
+                unchanged += 1
+            elif action == "changed":
+                changed_names.append(name)
+            elif action == "missing" and remote_id in remote_front_ids:
+                if not backup_path:
+                    backup = await create_database_backup("florality_front_import")
+                    backup_path = str(backup)
+                    logger.info("Database backup created before Florality front import: %s", backup.name)
+                imported_member = await self.import_member_from_florality(remote_member, create_backup=False)
+                if imported_member:
+                    imported_front_names.append(imported_member["name"])
+                else:
+                    skipped += 1
+            elif action == "missing":
+                missing_local_names.append(name)
+            else:
+                skipped += 1
 
         deleted_ids = await repo.get_deleted_member_ids()
         mappings = await repo.get_external_id_mappings(PROVIDER, MEMBER_ENTITY)
@@ -223,10 +259,17 @@ class FloralityClient:
             member = await repo.get_member_by_id(local_id)
             if not member:
                 continue
-            if await repo.logical_delete_member(local_id, created_by=None):
-                counts["deleted"] += 1
+            missing_remote_names.append(str(member.get("name") or local_id))
 
-        return FloralityImportResult(**counts, backup_path=str(backup_path))
+        return FloralityImportResult(
+            imported_front_names=tuple(imported_front_names),
+            changed_names=tuple(changed_names),
+            missing_local_names=tuple(missing_local_names),
+            missing_remote_names=tuple(missing_remote_names),
+            unchanged=unchanged,
+            skipped=skipped,
+            backup_path=backup_path,
+        )
 
     async def get_front(self) -> list[dict[str, Any]] | None:
         if not self.front_pull_enabled:

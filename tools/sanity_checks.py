@@ -382,6 +382,28 @@ async def main() -> None:
         )
         _check("changed Florality member import should update local member", import_action == "updated")
         _check("Florality member update should change pronouns", imported_member["pronouns"] == "they/them")
+        compared_member, compare_action = await temp_repo.compare_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member Updated",
+                "pronouns": "they/them",
+                "about": "Imported test description",
+                "avatar": "",
+            },
+            "remote-imported-member",
+        )
+        _check("Florality dry-run compare should detect unchanged member", compared_member["id"] == imported_member["id"] and compare_action == "unchanged")
+        compared_member, compare_action = await temp_repo.compare_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member Updated",
+                "pronouns": "she/her",
+                "about": "Imported test description",
+                "avatar": "",
+            },
+            "remote-imported-member",
+        )
+        _check("Florality dry-run compare should detect changed member", compared_member["id"] == imported_member["id"] and compare_action == "changed")
 
         deleted = await temp_repo.logical_delete_member(member["id"], created_by=1)
         _check("logical delete should succeed", deleted)

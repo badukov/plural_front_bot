@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
 from app.florality import import_florality_members, sync_florality_member
-from app.formatters import format_member_brief
+from app.formatters import format_member_brief, split_long_message
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
     add_category_keyboard,
@@ -23,6 +23,12 @@ from app.states import AddMemberState, DeleteMemberState
 
 
 router = Router()
+
+
+def _names_block(names: tuple[str, ...]) -> str:
+    if not names:
+        return "-"
+    return "\n".join(f"- {name}" for name in names)
 
 
 def _is_skip(text: str) -> bool:
@@ -188,15 +194,25 @@ async def import_from_florality(callback: CallbackQuery) -> None:
     text = t(
         "florality_import_done",
         lang,
-        created=result.created,
-        updated=result.updated,
+        imported_front=_names_block(result.imported_front_names),
+        changed=_names_block(result.changed_names),
+        missing_local=_names_block(result.missing_local_names),
+        missing_remote=_names_block(result.missing_remote_names),
         unchanged=result.unchanged,
-        deleted=result.deleted,
         skipped=result.skipped,
         backup=Path(result.backup_path).name if result.backup_path else "-",
     )
     if callback.message:
-        await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))
+        chunks = split_long_message(text)
+        await callback.message.edit_text(
+            chunks[0],
+            reply_markup=add_member_menu_keyboard(lang) if len(chunks) == 1 else None,
+        )
+        for index, chunk in enumerate(chunks[1:], start=1):
+            await callback.message.answer(
+                chunk,
+                reply_markup=add_member_menu_keyboard(lang) if index == len(chunks) - 1 else None,
+            )
 
 
 @router.callback_query(lambda callback: callback.data == "add:delete")
