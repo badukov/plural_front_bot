@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -18,6 +19,18 @@ PROVIDER = "florality"
 MEMBER_ENTITY = "member"
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FloralityImportResult:
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    skipped: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.created + self.updated + self.unchanged + self.skipped
 
 
 def _normalized_name(value: object) -> str:
@@ -146,6 +159,46 @@ class FloralityClient:
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         return None
+
+    async def import_member_from_florality(self, remote_member: dict[str, Any]) -> dict[str, Any] | None:
+        remote_id = _remote_member_id(remote_member)
+        if not remote_id:
+            logger.warning("Florality member import skipped: remote id is missing")
+            return None
+        try:
+            member, _action = await repo.upsert_florality_member(remote_member, remote_id)
+            return member
+        except ValueError:
+            logger.warning("Florality member import skipped: required fields are missing")
+            return None
+        except Exception:
+            logger.exception("Unexpected Florality member import error")
+            return None
+
+    async def import_members_from_florality(self) -> FloralityImportResult:
+        if not self.enabled:
+            return FloralityImportResult()
+
+        remote_members = await self.list_members()
+        if remote_members is None:
+            return FloralityImportResult(skipped=1)
+
+        counts = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+        for remote_member in remote_members:
+            remote_id = _remote_member_id(remote_member)
+            if not remote_id:
+                counts["skipped"] += 1
+                continue
+            try:
+                _member, action = await repo.upsert_florality_member(remote_member, remote_id)
+                counts[action] += 1
+            except ValueError:
+                counts["skipped"] += 1
+            except Exception:
+                counts["skipped"] += 1
+                logger.exception("Unexpected Florality member import error")
+
+        return FloralityImportResult(**counts)
 
     async def get_front(self) -> list[dict[str, Any]] | None:
         if not self.front_pull_enabled:
@@ -336,6 +389,8 @@ class FloralityClient:
                 for remote_member in remote_front_members:
                     local_member = await self._resolve_local_front_member(remote_member)
                     if not local_member:
+                        local_member = await self.import_member_from_florality(remote_member)
+                    if not local_member:
                         logger.warning(
                             "Florality front pull skipped: remote member is not mapped to a local member"
                         )
@@ -363,6 +418,10 @@ async def sync_florality_member(member: dict[str, Any]) -> None:
 
 async def sync_florality_front(front_members: list[dict[str, Any]]) -> None:
     await florality.sync_front(front_members)
+
+
+async def import_florality_members() -> FloralityImportResult:
+    return await florality.import_members_from_florality()
 
 
 async def run_florality_front_pull(bot: Bot) -> None:

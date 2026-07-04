@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
-from app.florality import sync_florality_front, sync_florality_member
+from app.florality import import_florality_members, sync_florality_front, sync_florality_member
 from app.formatters import format_member_brief
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
@@ -166,10 +166,37 @@ async def add_new_member(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     await state.clear()
-    await state.set_state(AddMemberState.waiting_for_name)
+    await callback.answer(t("manual_add_disabled", lang), show_alert=True)
+    if callback.message:
+        await callback.message.edit_text(t("manual_add_disabled", lang), reply_markup=add_member_menu_keyboard(lang))
+
+
+@router.callback_query(lambda callback: callback.data == "add:import_florality")
+async def import_from_florality(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    if not settings.florality_api_token:
+        await callback.answer(t("florality_not_configured", lang), show_alert=True)
+        return
+
     await callback.answer()
     if callback.message:
-        await callback.message.edit_text(t("enter_new_name", lang))
+        await callback.message.edit_text(t("florality_import_started", lang))
+
+    result = await import_florality_members()
+    text = t(
+        "florality_import_done",
+        lang,
+        created=result.created,
+        updated=result.updated,
+        unchanged=result.unchanged,
+        skipped=result.skipped,
+    )
+    if callback.message:
+        await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data == "add:delete")

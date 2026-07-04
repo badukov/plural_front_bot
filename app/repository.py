@@ -16,6 +16,7 @@ from app.config import settings
 MENTION_RE = re.compile(r"<###@([^#<>]+)###>")
 SEARCH_SPLIT_RE = re.compile(r"[^0-9a-zа-яё]+", re.IGNORECASE)
 DELETED_GROUP_NAMES = {"deleted", "trash", "удаленные", "удалённые", "удалено"}
+EXTERNAL_ID_CLEANUP_RE = re.compile(r"[^0-9A-Za-z_-]+")
 
 EN_TO_RU_KEYBOARD_MAP = {
     "q": "й",
@@ -146,6 +147,10 @@ def _normalize_search_text(text: str) -> str:
 
 def _compact_search_text(text: str) -> str:
     return text.replace(" ", "")
+
+
+def _json(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True)
 
 
 def _cyrillic_to_latin(text: str) -> str:
@@ -517,6 +522,142 @@ class Repository:
         if len(unique_ids) == 1:
             return matches[0]
         return None
+
+    async def upsert_florality_member(self, remote_member: dict[str, Any], remote_id: str) -> tuple[dict[str, Any], str]:
+        name = str(remote_member.get("name") or remote_member.get("displayName") or "").strip()
+        if not name:
+            raise ValueError("Florality member has no name")
+
+        mapped_local_id = await self.get_local_id_for_external_id("florality", "member", remote_id)
+        existing = await self.get_member_by_id(mapped_local_id) if mapped_local_id else None
+
+        if not existing:
+            existing = await self.find_unique_member_by_names(
+                [
+                    str(remote_member.get("name") or "").strip(),
+                    str(remote_member.get("displayName") or "").strip(),
+                ]
+            )
+
+        cleaned_remote_id = EXTERNAL_ID_CLEANUP_RE.sub("_", remote_id).strip("_") or uuid.uuid4().hex
+        local_id = str(existing["id"]) if existing else f"florality_{cleaned_remote_id}"
+        if existing:
+            try:
+                raw = json.loads(existing.get("raw_json") or "{}")
+            except json.JSONDecodeError:
+                raw = {}
+        else:
+            raw = {
+                "_id": local_id,
+                "uid": local_id,
+                "color": "",
+                "avatarUuid": "",
+                "pkId": "",
+                "private": False,
+                "buckets": [],
+                "info": {},
+            }
+        raw.update(
+            {
+                "_id": raw.get("_id") or local_id,
+                "uid": raw.get("uid") or local_id,
+                "name": name,
+                "pronouns": remote_member.get("pronouns") or "",
+                "desc": remote_member.get("about") or raw.get("desc") or "",
+                "avatarUrl": remote_member.get("avatar") or raw.get("avatarUrl") or "",
+                "archived": bool(remote_member.get("deletedAt")) or bool(raw.get("archived")),
+                "archivedReason": (
+                    "Deleted in Florality"
+                    if remote_member.get("deletedAt")
+                    else raw.get("archivedReason") or ""
+                ),
+                "florality": {
+                    "_id": remote_id,
+                    "displayName": remote_member.get("displayName") or "",
+                    "createdAt": remote_member.get("createdAt") or "",
+                    "updatedAt": remote_member.get("updatedAt") or "",
+                    "deletedAt": remote_member.get("deletedAt") or "",
+                },
+            }
+        )
+        values = {
+            "name": name,
+            "pronouns": str(remote_member.get("pronouns") or ""),
+            "description": str(remote_member.get("about") or ""),
+            "avatar_url": str(remote_member.get("avatar") or ""),
+            "is_archived": 1 if (remote_member.get("deletedAt") or (existing and existing.get("is_archived"))) else 0,
+            "archived_reason": (
+                "Deleted in Florality"
+                if remote_member.get("deletedAt")
+                else str(existing.get("archived_reason") or "") if existing else ""
+            ),
+            "raw_json": _json(raw),
+        }
+
+        action = "created"
+        if existing:
+            comparable = {
+                "name": existing.get("name") or "",
+                "pronouns": existing.get("pronouns") or "",
+                "description": existing.get("description") or "",
+                "avatar_url": existing.get("avatar_url") or "",
+                "is_archived": 1 if existing.get("is_archived") else 0,
+                "archived_reason": existing.get("archived_reason") or "",
+            }
+            action = "unchanged" if all(comparable[key] == values[key] for key in comparable) else "updated"
+
+        async with self._connect() as db:
+            if existing:
+                await db.execute(
+                    """
+                    UPDATE members
+                    SET name=?,
+                        pronouns=?,
+                        description=?,
+                        avatar_url=?,
+                        is_archived=?,
+                        archived_reason=?,
+                        raw_json=?
+                    WHERE id=?
+                    """,
+                    (
+                        values["name"],
+                        values["pronouns"],
+                        values["description"],
+                        values["avatar_url"],
+                        values["is_archived"],
+                        values["archived_reason"],
+                        values["raw_json"],
+                        local_id,
+                    ),
+                )
+            else:
+                await db.execute(
+                    """
+                    INSERT INTO members(
+                        id, name, pronouns, description, color, avatar_url, avatar_uuid,
+                        pk_id, is_private, is_archived, archived_reason, raw_json
+                    )
+                    VALUES (?, ?, ?, ?, '', ?, '', '', 0, ?, ?, ?)
+                    """,
+                    (
+                        local_id,
+                        values["name"],
+                        values["pronouns"],
+                        values["description"],
+                        values["avatar_url"],
+                        values["is_archived"],
+                        values["archived_reason"],
+                        values["raw_json"],
+                    ),
+                )
+            await db.commit()
+
+        await self.set_external_id("florality", "member", local_id, remote_id)
+        member = await self.get_member_by_id(local_id)
+        if member is None:
+            raise RuntimeError("Imported Florality member was not found")
+        return member, action
 
     async def replace_front_members(
         self,

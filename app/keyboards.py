@@ -98,7 +98,7 @@ def search_results_keyboard(members: list[dict[str, Any]], lang: str = "ru") -> 
 def add_member_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=t("new_member", lang), callback_data="add:new")],
+            [InlineKeyboardButton(text=t("import_florality", lang), callback_data="add:import_florality")],
             [InlineKeyboardButton(text=t("delete_member", lang), callback_data="add:delete")],
             [InlineKeyboardButton(text=t("export_json", lang), callback_data="add:export")],
             [InlineKeyboardButton(text=t("cancel", lang), callback_data="add:cancel")],

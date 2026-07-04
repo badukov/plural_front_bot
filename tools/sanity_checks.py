@@ -343,6 +343,44 @@ async def main() -> None:
         )
         _check("same front replacement should be a no-op", front_unchanged is False)
 
+        imported_member, import_action = await temp_repo.upsert_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member",
+                "pronouns": "she/her",
+                "about": "Imported test description",
+                "avatar": "",
+            },
+            "remote-imported-member",
+        )
+        _check("Florality member import should create local member", import_action == "created")
+        _check("Florality imported member should use local id prefix", imported_member["id"].startswith("florality_"))
+
+        imported_member, import_action = await temp_repo.upsert_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member",
+                "pronouns": "she/her",
+                "about": "Imported test description",
+                "avatar": "",
+            },
+            "remote-imported-member",
+        )
+        _check("unchanged Florality member import should be a no-op", import_action == "unchanged")
+
+        imported_member, import_action = await temp_repo.upsert_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member Updated",
+                "pronouns": "they/them",
+                "about": "Imported test description",
+                "avatar": "",
+            },
+            "remote-imported-member",
+        )
+        _check("changed Florality member import should update local member", import_action == "updated")
+        _check("Florality member update should change pronouns", imported_member["pronouns"] == "they/them")
+
         deleted = await temp_repo.logical_delete_member(member["id"], created_by=1)
         _check("logical delete should succeed", deleted)
         deleted_group = await temp_repo.find_deleted_group()

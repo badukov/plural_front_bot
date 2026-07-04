@@ -12,7 +12,7 @@ BUTTON_LABELS = {
     "info": {"ru": "Инфо о фронте", "en": "Front info", "it": "Info fronte"},
     "directory": {"ru": "Справочник", "en": "Directory", "it": "Elenco"},
     "notifications": {"ru": "Оповещения", "en": "Notifications", "it": "Notifiche"},
-    "add_member": {"ru": "Добавить личность", "en": "Add member", "it": "Aggiungi membro"},
+    "add_member": {"ru": "Управление личностями", "en": "Manage members", "it": "Gestione membri"},
 }
 
 
@@ -51,6 +51,7 @@ TEXTS = {
     "remove_category": {"ru": "Убрать из выбранных", "en": "Remove from selected", "it": "Rimuovi dalla selezione"},
     "open_children": {"ru": "Открыть вложенные", "en": "Open children", "it": "Apri sottocategorie"},
     "new_member": {"ru": "Новая личность", "en": "New member", "it": "Nuovo membro"},
+    "import_florality": {"ru": "Импорт из Florality", "en": "Import from Florality", "it": "Importa da Florality"},
     "delete_member": {"ru": "Удалить личность", "en": "Delete member", "it": "Elimina membro"},
     "export_json": {"ru": "Экспорт JSON", "en": "Export JSON", "it": "Esporta JSON"},
     "pronouns": {"ru": "Местоимения", "en": "Pronouns", "it": "Pronomi"},
@@ -62,7 +63,7 @@ TEXTS = {
     "front_blur": {"ru": "блюр", "en": "blur", "it": "blur"},
     "front_status": {"ru": "фронт - {names}", "en": "front - {names}", "it": "fronte - {names}"},
     "admin_start": {
-        "ru": "Вы админ. Доступно управление фронтом, справочник и добавление личностей.\nВ базе личностей: {count}.",
+        "ru": "Вы админ. Доступно управление фронтом, справочник и управление личностями.\nВ базе личностей: {count}.",
         "en": "You are an admin. Front controls, directory, and member management are available.\nMembers in database: {count}.",
         "it": "Sei admin. Sono disponibili gestione del fronte, elenco e gestione membri.\nMembri nel database: {count}.",
     },
@@ -142,7 +143,27 @@ TEXTS = {
         "en": "Front change notifications are off.",
         "it": "Le notifiche sui cambi del fronte sono disattivate.",
     },
-    "add_menu": {"ru": "Меню добавления:", "en": "Member management:", "it": "Gestione membri:"},
+    "add_menu": {"ru": "Управление личностями:", "en": "Member management:", "it": "Gestione membri:"},
+    "florality_not_configured": {
+        "ru": "Florality не настроен: добавьте FLORALITY_API_TOKEN в .env.",
+        "en": "Florality is not configured: add FLORALITY_API_TOKEN to .env.",
+        "it": "Florality non e configurato: aggiungi FLORALITY_API_TOKEN in .env.",
+    },
+    "florality_import_started": {
+        "ru": "Импорт из Florality запущен...",
+        "en": "Florality import started...",
+        "it": "Import da Florality avviato...",
+    },
+    "florality_import_done": {
+        "ru": "Импорт из Florality завершён.\nСоздано: {created}\nОбновлено: {updated}\nБез изменений: {unchanged}\nПропущено: {skipped}",
+        "en": "Florality import finished.\nCreated: {created}\nUpdated: {updated}\nUnchanged: {unchanged}\nSkipped: {skipped}",
+        "it": "Import da Florality completato.\nCreati: {created}\nAggiornati: {updated}\nSenza modifiche: {unchanged}\nSaltati: {skipped}",
+    },
+    "manual_add_disabled": {
+        "ru": "Ручное добавление временно отключено. Используйте импорт из Florality.",
+        "en": "Manual creation is temporarily disabled. Use Florality import.",
+        "it": "La creazione manuale e temporaneamente disattivata. Usa l'import da Florality.",
+    },
     "enter_new_name": {"ru": "Введите имя новой личности:", "en": "Enter the new member name:", "it": "Inserisci il nome del nuovo membro:"},
     "name_required": {"ru": "Имя обязательно. Введите имя новой личности:", "en": "Name is required. Enter the new member name:", "it": "Il nome e obbligatorio. Inserisci il nome:"},
     "enter_pronouns": {"ru": "Введите местоимения или «-», чтобы пропустить:", "en": "Enter pronouns or '-' to skip:", "it": "Inserisci i pronomi o '-' per saltare:"},
