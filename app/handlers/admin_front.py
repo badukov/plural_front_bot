@@ -103,6 +103,7 @@ async def set_blur(message: Message) -> None:
         return
 
     await repo.clear_front(created_by=message.from_user.id if message.from_user else None)
+    await repo.record_current_front_history("blur", message.from_user.id if message.from_user else None)
     await sync_florality_front([])
     await broadcast_by_language(
         message.bot,

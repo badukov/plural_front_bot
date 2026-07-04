@@ -52,6 +52,7 @@ async def set_front_callback(callback: CallbackQuery) -> None:
     status = current_status_text(front_members, lang)
 
     if added:
+        await repo.record_current_front_history("front_added", callback.from_user.id if callback.from_user else None)
         await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,
@@ -92,6 +93,7 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
 
     if removed:
         text = t("front_removed", lang, name=member["name"], status=status)
+        await repo.record_current_front_history("front_removed", callback.from_user.id if callback.from_user else None)
         await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,

@@ -17,6 +17,8 @@ BTN_BLUR = "Блюр"
 BTN_INFO = "Инфо о фронте"
 BTN_DIRECTORY = "Справочник"
 BTN_NOTIFICATIONS = "Оповещения"
+BTN_HISTORY = "История"
+BTN_STATISTICS = "Статистика"
 BTN_ADD_MEMBER = "Добавить личность"
 
 
@@ -25,13 +27,14 @@ def main_keyboard(is_admin: bool, lang: str = "ru") -> ReplyKeyboardMarkup:
         keyboard = [
             [KeyboardButton(text=button_text("front", lang)), KeyboardButton(text=button_text("remove_front", lang))],
             [KeyboardButton(text=button_text("blur", lang)), KeyboardButton(text=button_text("info", lang))],
+            [KeyboardButton(text=button_text("history", lang)), KeyboardButton(text=button_text("statistics", lang))],
             [KeyboardButton(text=button_text("directory", lang)), KeyboardButton(text=button_text("notifications", lang))],
             [KeyboardButton(text=button_text("add_member", lang))],
         ]
     else:
         keyboard = [
-            [KeyboardButton(text=button_text("info", lang)), KeyboardButton(text=button_text("directory", lang))],
-            [KeyboardButton(text=button_text("notifications", lang))],
+            [KeyboardButton(text=button_text("info", lang)), KeyboardButton(text=button_text("notifications", lang))],
+            [KeyboardButton(text=button_text("history", lang))],
         ]
 
     return ReplyKeyboardMarkup(

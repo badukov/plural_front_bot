@@ -12,6 +12,8 @@ BUTTON_LABELS = {
     "info": {"ru": "Инфо о фронте", "en": "Front info", "it": "Info fronte"},
     "directory": {"ru": "Справочник", "en": "Directory", "it": "Elenco"},
     "notifications": {"ru": "Оповещения", "en": "Notifications", "it": "Notifiche"},
+    "history": {"ru": "История", "en": "History", "it": "Cronologia"},
+    "statistics": {"ru": "Статистика", "en": "Stats", "it": "Statistiche"},
     "add_member": {"ru": "Управление личностями", "en": "Manage members", "it": "Gestione membri"},
 }
 
@@ -70,9 +72,9 @@ TEXTS = {
         "it": "Sei admin. Sono disponibili gestione del fronte, elenco e gestione membri.\nMembri nel database: {count}.",
     },
     "user_start": {
-        "ru": "Вам доступны информация о фронте, справочник, поиск по имени и оповещения.\nВ базе личностей: {count}.",
-        "en": "You can use front info, directory, name search, and notifications.\nMembers in database: {count}.",
-        "it": "Puoi usare info fronte, elenco, ricerca per nome e notifiche.\nMembri nel database: {count}.",
+        "ru": "Вам доступны информация о фронте, история и оповещения.\nВ базе личностей: {count}.",
+        "en": "You can use front info, history, and notifications.\nMembers in database: {count}.",
+        "it": "Puoi usare info fronte, cronologia e notifiche.\nMembri nel database: {count}.",
     },
     "buttons_updated": {"ru": "Кнопки обновлены.", "en": "Buttons updated.", "it": "Pulsanti aggiornati."},
     "admin_only": {
@@ -128,6 +130,19 @@ TEXTS = {
         "en": "Front changed in Florality",
         "it": "Fronte cambiato in Florality",
     },
+    "history_title": {"ru": "История фронта:", "en": "Front history:", "it": "Cronologia fronte:"},
+    "history_empty": {
+        "ru": "История пока пустая. Новые изменения фронта начнут сохраняться с этого обновления.",
+        "en": "History is empty so far. New front changes will be saved from this update.",
+        "it": "La cronologia e vuota per ora. I nuovi cambi del fronte saranno salvati da questo aggiornamento.",
+    },
+    "stats_title": {"ru": "Статистика за {days} дней:", "en": "Stats for {days} days:", "it": "Statistiche per {days} giorni:"},
+    "stats_changes": {"ru": "Изменений фронта: {count}", "en": "Front changes: {count}", "it": "Cambi fronte: {count}"},
+    "stats_unique": {"ru": "Уникальных фронтеров: {count}", "en": "Unique fronters: {count}", "it": "Fronter unici: {count}"},
+    "stats_blur": {"ru": "Блюров: {count}", "en": "Blur events: {count}", "it": "Eventi blur: {count}"},
+    "stats_top": {"ru": "Чаще всего появлялись:", "en": "Most frequent:", "it": "Piu frequenti:"},
+    "stats_busiest_day": {"ru": "Самый активный день: {day} ({count})", "en": "Busiest day: {day} ({count})", "it": "Giorno piu attivo: {day} ({count})"},
+    "stats_last_change": {"ru": "Последнее изменение: {time}", "en": "Last change: {time}", "it": "Ultimo cambio: {time}"},
     "directory_home": {
         "ru": "Справочник: выберите способ просмотра.",
         "en": "Directory: choose how to browse.",

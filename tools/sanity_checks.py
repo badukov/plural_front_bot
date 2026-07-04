@@ -12,7 +12,14 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.config import settings
 from app.database import init_db
-from app.formatters import current_status_text, format_front_info, format_member_brief, split_long_message
+from app.formatters import (
+    current_status_text,
+    format_front_history,
+    format_front_info,
+    format_front_statistics,
+    format_member_brief,
+    split_long_message,
+)
 from app.i18n import all_button_texts, button_text, is_button_text, normalize_lang
 from app.keyboards import (
     add_category_keyboard,
@@ -344,6 +351,16 @@ async def main() -> None:
             details={"source": "sanity"},
         )
         _check("same front replacement should be a no-op", front_unchanged is False)
+        await temp_repo.record_current_front_history("test_front_replace", created_by=None)
+        history_rows = await temp_repo.get_front_history(limit=5)
+        _check("front history should store compressed snapshots", len(history_rows) == 1)
+        _check("front history should restore snapshot members", history_rows[0]["members"][0]["id"] == member["id"])
+        history_text = format_front_history(history_rows)
+        _check("front history text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(history_text)))
+        stats = await temp_repo.get_front_statistics(days=30)
+        _check("front statistics should count history rows", stats["changes"] == 1)
+        stats_text = format_front_statistics(stats)
+        _check("front statistics text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(stats_text)))
 
         imported_member, import_action = await temp_repo.upsert_florality_member(
             {
@@ -458,9 +475,12 @@ async def main() -> None:
         user_columns = {row[1] for row in cur.fetchall()}
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_ids'")
         external_ids_exists = cur.fetchone() is not None
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='front_history'")
+        front_history_exists = cur.fetchone() is not None
         con.close()
         _check("users migration should add language_code", "language_code" in user_columns)
         _check("init should create external id mappings table", external_ids_exists)
+        _check("init should create front history table", front_history_exists)
 
     print("Sanity checks passed.")
     print(

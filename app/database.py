@@ -82,11 +82,20 @@ CREATE TABLE IF NOT EXISTS external_ids (
     PRIMARY KEY (provider, entity_type, local_id)
 );
 
+CREATE TABLE IF NOT EXISTS front_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    snapshot_json_z TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_members_name ON members(name);
 CREATE INDEX IF NOT EXISTS idx_member_groups_member ON member_groups(member_id);
 CREATE INDEX IF NOT EXISTS idx_member_groups_group ON member_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_front_state_fronted_at ON front_state(fronted_at);
 CREATE INDEX IF NOT EXISTS idx_external_ids_remote ON external_ids(provider, entity_type, remote_id);
+CREATE INDEX IF NOT EXISTS idx_front_history_created_at ON front_history(created_at);
 """
 
 

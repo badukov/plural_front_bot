@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Any
 
 from app.i18n import t
@@ -7,6 +8,15 @@ from app.repository import repo
 
 
 IMAGE_MD_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+
+EVENT_LABELS = {
+    "initial": {"ru": "начальное состояние", "en": "initial state", "it": "stato iniziale"},
+    "front_added": {"ru": "добавление", "en": "added", "it": "aggiunta"},
+    "front_removed": {"ru": "снятие", "en": "removed", "it": "rimozione"},
+    "front_replaced": {"ru": "замена фронта", "en": "front replaced", "it": "fronte sostituito"},
+    "blur": {"ru": "блюр", "en": "blur", "it": "blur"},
+    "florality_front_pulled": {"ru": "из Florality", "en": "from Florality", "it": "da Florality"},
+}
 
 
 def _clean_text(value: str | None) -> str:
@@ -22,6 +32,35 @@ def current_status_text(front_members: list[dict[str, Any]], lang: str = "ru") -
         return t("front_blur", lang)
     names = ", ".join(member["name"] for member in front_members)
     return t("front_status", lang, names=names)
+
+
+def _event_label(event_type: str, lang: str) -> str:
+    values = EVENT_LABELS.get(event_type)
+    if not values:
+        return event_type
+    return values.get(lang) or values["ru"]
+
+
+def _relative_time(ms: int, lang: str) -> str:
+    seconds = max(0, int(time.time() - ms / 1000))
+    units = [
+        (24 * 60 * 60, {"ru": "дн.", "en": "d", "it": "g"}),
+        (60 * 60, {"ru": "ч.", "en": "h", "it": "h"}),
+        (60, {"ru": "мин.", "en": "min", "it": "min"}),
+    ]
+    for size, names in units:
+        if seconds >= size:
+            return f"{seconds // size} {names.get(lang, names['ru'])}"
+    return {"ru": "только что", "en": "just now", "it": "adesso"}.get(lang, "только что")
+
+
+def universal_time_text(ms: int, lang: str = "ru") -> str:
+    utc_text = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ms / 1000))
+    rel = _relative_time(ms, lang)
+    if rel == "только что" or rel in {"just now", "adesso"}:
+        return f"{utc_text} ({rel})"
+    suffix = {"ru": "назад", "en": "ago", "it": "fa"}.get(lang, "назад")
+    return f"{utc_text} ({rel} {suffix})"
 
 
 async def format_member_brief(member: dict[str, Any], lang: str = "ru") -> str:
@@ -115,6 +154,49 @@ async def format_front_info(front_members: list[dict[str, Any]], lang: str = "ru
     for member in front_members:
         chunks.append(await format_member_info(member, lang))
     return "\n\n—————\n\n".join(chunks)
+
+
+def format_front_history(rows: list[dict[str, Any]], lang: str = "ru") -> str:
+    if not rows:
+        return t("history_empty", lang)
+
+    lines = [t("history_title", lang)]
+    for row in rows:
+        members = row.get("members") or []
+        names = [
+            str(member.get("name") or "").strip()
+            for member in members
+            if isinstance(member, dict) and str(member.get("name") or "").strip()
+        ]
+        status = t("front_blur", lang) if not names else t("front_status", lang, names=", ".join(names))
+        lines.append(
+            f"{universal_time_text(int(row['created_at']), lang)}\n"
+            f"{_event_label(str(row.get('event_type') or ''), lang)}: {status}"
+        )
+    return "\n\n".join(lines)
+
+
+def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
+    lines = [t("stats_title", lang, days=stats["days"])]
+    lines.append(t("stats_changes", lang, count=stats["changes"]))
+    lines.append(t("stats_unique", lang, count=stats["unique_count"]))
+    lines.append(t("stats_blur", lang, count=stats["blur_count"]))
+
+    top_members = stats.get("top_members") or []
+    if top_members:
+        top_lines = [f"- {name}: {count}" for name, count in top_members]
+        lines.append(t("stats_top", lang) + "\n" + "\n".join(top_lines))
+    else:
+        lines.append(t("stats_top", lang) + "\n-")
+
+    busiest_day = stats.get("busiest_day")
+    if busiest_day:
+        lines.append(t("stats_busiest_day", lang, day=busiest_day[0], count=busiest_day[1]))
+
+    last_change_at = int(stats.get("last_change_at") or 0)
+    if last_change_at:
+        lines.append(t("stats_last_change", lang, time=universal_time_text(last_change_at, lang)))
+    return "\n\n".join(lines)
 
 
 def split_long_message(text: str, limit: int = 3900) -> list[str]:

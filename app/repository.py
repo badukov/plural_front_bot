@@ -1,4 +1,6 @@
 import hashlib
+import base64
+import gzip
 import json
 import re
 import time
@@ -152,6 +154,16 @@ def _compact_search_text(text: str) -> str:
 
 def _json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True)
+
+
+def _pack_json(obj: Any) -> str:
+    raw = json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return base64.b64encode(gzip.compress(raw)).decode("ascii")
+
+
+def _unpack_json(value: str) -> Any:
+    raw = gzip.decompress(base64.b64decode(value.encode("ascii")))
+    return json.loads(raw.decode("utf-8"))
 
 
 def _cyrillic_to_latin(text: str) -> str:
@@ -443,6 +455,115 @@ class Repository:
                 """
             )
             return [dict(row) for row in await cursor.fetchall()]
+
+    async def record_current_front_history(self, event_type: str, created_by: int | None) -> None:
+        front_members = await self.get_current_front_members()
+        snapshot = {
+            "members": [
+                {
+                    "id": str(member.get("id") or ""),
+                    "name": str(member.get("name") or ""),
+                }
+                for member in front_members
+            ],
+        }
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO front_history(event_type, created_by, created_at, snapshot_json_z)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event_type, created_by, _now_ms(), _pack_json(snapshot)),
+            )
+            await db.commit()
+
+    async def count_front_history(self) -> int:
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT COUNT(*) AS c FROM front_history")
+            row = await cursor.fetchone()
+            return int(row["c"])
+
+    async def get_front_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT id, event_type, created_by, created_at, snapshot_json_z
+                FROM front_history
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+
+        result = []
+        for row in rows:
+            try:
+                snapshot = _unpack_json(row["snapshot_json_z"])
+            except Exception:
+                snapshot = {"members": []}
+            result.append(
+                {
+                    "id": row["id"],
+                    "event_type": row["event_type"],
+                    "created_by": row["created_by"],
+                    "created_at": row["created_at"],
+                    "members": snapshot.get("members") if isinstance(snapshot, dict) else [],
+                }
+            )
+        return result
+
+    async def get_front_statistics(self, days: int = 30) -> dict[str, Any]:
+        since = _now_ms() - days * 24 * 60 * 60 * 1000
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT event_type, created_at, snapshot_json_z
+                FROM front_history
+                WHERE created_at >= ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (since,),
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+
+        member_counts: dict[str, int] = {}
+        day_counts: dict[str, int] = {}
+        blur_count = 0
+        unique_names: set[str] = set()
+        last_change_at = 0
+        for row in rows:
+            last_change_at = max(last_change_at, int(row["created_at"]))
+            try:
+                snapshot = _unpack_json(row["snapshot_json_z"])
+            except Exception:
+                snapshot = {"members": []}
+            members = snapshot.get("members") if isinstance(snapshot, dict) else []
+            if not members:
+                blur_count += 1
+            for member in members:
+                if not isinstance(member, dict):
+                    continue
+                name = str(member.get("name") or "").strip()
+                if not name:
+                    continue
+                unique_names.add(name)
+                member_counts[name] = member_counts.get(name, 0) + 1
+
+            day = time.strftime("%Y-%m-%d", time.gmtime(int(row["created_at"]) / 1000))
+            day_counts[day] = day_counts.get(day, 0) + 1
+
+        top_members = sorted(member_counts.items(), key=lambda item: (-item[1], item[0].casefold()))[:5]
+        busiest_day = max(day_counts.items(), key=lambda item: item[1]) if day_counts else None
+        return {
+            "days": days,
+            "changes": len(rows),
+            "blur_count": blur_count,
+            "unique_count": len(unique_names),
+            "top_members": top_members,
+            "busiest_day": busiest_day,
+            "last_change_at": last_change_at,
+        }
 
     async def get_member_by_id(self, member_id: str) -> dict[str, Any] | None:
         async with self._connect() as db:

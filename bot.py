@@ -9,11 +9,13 @@ from app.config import settings
 from app.database import init_db
 from app.florality import run_florality_front_pull
 from app.import_sp import import_simply_plural_export
+from app.repository import repo
 from app.user_context import UserLanguageMiddleware
 from app.handlers import (
     start,
     info,
     notifications,
+    history,
     admin_front,
     admin_add,
     directory,
@@ -45,6 +47,9 @@ async def main() -> None:
         else:
             logging.warning("AUTO_IMPORT_ON_START=true, but export file does not exist: %s", settings.sp_export_path)
 
+    if await repo.count_front_history() == 0:
+        await repo.record_current_front_history("initial", created_by=None)
+
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
     language_middleware = UserLanguageMiddleware()
@@ -54,6 +59,7 @@ async def main() -> None:
     dp.include_router(start.router)
     dp.include_router(info.router)
     dp.include_router(notifications.router)
+    dp.include_router(history.router)
     dp.include_router(admin_front.router)
     dp.include_router(admin_add.router)
     dp.include_router(directory.router)

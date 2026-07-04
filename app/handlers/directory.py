@@ -337,6 +337,7 @@ async def directory_add_to_front(callback: CallbackQuery) -> None:
     front_members = await repo.get_current_front_members()
     status = current_status_text(front_members, lang)
     if added:
+        await repo.record_current_front_history("front_added", callback.from_user.id if callback.from_user else None)
         await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,
@@ -377,6 +378,7 @@ async def directory_replace_front(callback: CallbackQuery) -> None:
     front_members = await repo.get_current_front_members()
     status = current_status_text(front_members, lang)
     if changed:
+        await repo.record_current_front_history("front_replaced", callback.from_user.id if callback.from_user else None)
         await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,

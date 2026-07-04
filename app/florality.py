@@ -474,6 +474,8 @@ class FloralityClient:
                     event_type="florality_front_pulled",
                     details={"provider": PROVIDER, "front_count": len(local_ids)},
                 )
+                if changed:
+                    await repo.record_current_front_history("florality_front_pulled", created_by=None)
                 return changed, await repo.get_current_front_members()
         except Exception:
             logger.exception("Unexpected Florality front pull error")
