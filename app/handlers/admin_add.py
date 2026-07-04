@@ -126,7 +126,8 @@ async def _finish_member(callback: CallbackQuery, state: FSMContext) -> None:
         group_ids=group_ids,
         created_by=callback.from_user.id if callback.from_user else None,
     )
-    await sync_florality_member(member)
+    if settings.florality_create_missing_members_enabled:
+        await sync_florality_member(member)
     await state.clear()
     await callback.answer(t("member_added_answer", lang))
     if callback.message:

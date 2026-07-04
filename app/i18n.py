@@ -118,6 +118,11 @@ TEXTS = {
     "front_removed_event": {"ru": "{name} снят с фронта", "en": "{name} left front", "it": "{name} ha lasciato il fronte"},
     "front_removed": {"ru": "{name} снят с фронта\n{status}", "en": "{name} left front\n{status}", "it": "{name} ha lasciato il fronte\n{status}"},
     "not_in_front": {"ru": "{name} сейчас не на фронте.\n{status}", "en": "{name} is not in front now.\n{status}", "it": "{name} non e al fronte ora.\n{status}"},
+    "front_changed_florality_event": {
+        "ru": "Фронт изменён во Florality",
+        "en": "Front changed in Florality",
+        "it": "Fronte cambiato in Florality",
+    },
     "directory_home": {
         "ru": "Справочник: выберите способ просмотра.",
         "en": "Directory: choose how to browse.",

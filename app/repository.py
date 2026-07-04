@@ -477,6 +477,85 @@ class Repository:
             )
             await db.commit()
 
+    async def get_local_id_for_external_id(self, provider: str, entity_type: str, remote_id: str) -> str | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT local_id
+                FROM external_ids
+                WHERE provider=? AND entity_type=? AND remote_id=?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (provider, entity_type, remote_id),
+            )
+            row = await cursor.fetchone()
+            return str(row["local_id"]) if row else None
+
+    async def find_unique_member_by_names(self, names: list[str]) -> dict[str, Any] | None:
+        normalized_names = {_normalize_search_text(name) for name in names if name and _normalize_search_text(name)}
+        if not normalized_names:
+            return None
+
+        deleted_ids = await self.get_deleted_member_ids()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT id, name, pronouns, is_private, is_archived
+                FROM members
+                ORDER BY name COLLATE NOCASE, id
+                """
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+
+        matches = [
+            row
+            for row in rows
+            if row["id"] not in deleted_ids and _normalize_search_text(row.get("name") or "") in normalized_names
+        ]
+        unique_ids = {row["id"] for row in matches}
+        if len(unique_ids) == 1:
+            return matches[0]
+        return None
+
+    async def replace_front_members(
+        self,
+        member_ids: list[str],
+        created_by: int | None,
+        event_type: str,
+        details: dict[str, Any] | None = None,
+    ) -> bool:
+        ordered_ids = list(dict.fromkeys(member_ids))
+        now = _now_ms()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT member_id FROM front_state ORDER BY fronted_at ASC, member_id"
+            )
+            current_ids = [row["member_id"] for row in await cursor.fetchall()]
+            if current_ids == ordered_ids:
+                return False
+
+            await db.execute("DELETE FROM front_state")
+            for index, member_id in enumerate(ordered_ids):
+                await db.execute(
+                    "INSERT INTO front_state(member_id, fronted_at) VALUES (?, ?)",
+                    (member_id, now + index),
+                )
+            await db.execute(
+                """
+                INSERT INTO events(event_type, member_id, created_by, created_at, details_json)
+                VALUES (?, NULL, ?, ?, ?)
+                """,
+                (
+                    event_type,
+                    created_by,
+                    now,
+                    json.dumps(details or {}, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            await db.commit()
+            return True
+
     async def get_group_by_name(self, name: str, parent_id: str | None = None) -> dict[str, Any] | None:
         async with self._connect() as db:
             if parent_id is None:

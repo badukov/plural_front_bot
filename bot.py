@@ -1,11 +1,13 @@
 import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
 from app.database import init_db
+from app.florality import run_florality_front_pull
 from app.import_sp import import_simply_plural_export
 from app.user_context import UserLanguageMiddleware
 from app.handlers import (
@@ -59,7 +61,13 @@ async def main() -> None:
     dp.include_router(global_search.router)
 
     logging.info("Bot started")
-    await dp.start_polling(bot)
+    florality_pull_task = asyncio.create_task(run_florality_front_pull(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        florality_pull_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await florality_pull_task
 
 
 if __name__ == "__main__":

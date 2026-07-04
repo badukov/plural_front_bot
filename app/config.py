@@ -46,6 +46,9 @@ class Settings:
     florality_api_base_url: str
     florality_sync_enabled: bool
     florality_sync_front_enabled: bool
+    florality_pull_front_enabled: bool
+    florality_pull_interval_seconds: int
+    florality_create_missing_members_enabled: bool
 
 
 settings = Settings(
@@ -61,6 +64,9 @@ settings = Settings(
     florality_api_base_url=os.getenv("FLORALITY_API_BASE_URL", "https://api.floralitys.com/api/v1").strip().rstrip("/"),
     florality_sync_enabled=_bool("FLORALITY_SYNC_ENABLED", True),
     florality_sync_front_enabled=_bool("FLORALITY_SYNC_FRONT_ENABLED", True),
+    florality_pull_front_enabled=_bool("FLORALITY_PULL_FRONT_ENABLED", True),
+    florality_pull_interval_seconds=max(15, int(os.getenv("FLORALITY_PULL_INTERVAL_SECONDS", "60"))),
+    florality_create_missing_members_enabled=_bool("FLORALITY_CREATE_MISSING_MEMBERS_ENABLED", False),
 )
 
 if not settings.bot_token:

@@ -320,6 +320,28 @@ async def main() -> None:
         await temp_repo.set_external_id("florality", "member", member["id"], "remote-member-id")
         remote_id = await temp_repo.get_external_id("florality", "member", member["id"])
         _check("external id mapping should be stored", remote_id == "remote-member-id")
+        local_id = await temp_repo.get_local_id_for_external_id("florality", "member", "remote-member-id")
+        _check("external id reverse mapping should be stored", local_id == member["id"])
+
+        unique_by_name = await temp_repo.find_unique_member_by_names(["Temporary Test Member"])
+        _check("unique exact member name should resolve", unique_by_name and unique_by_name["id"] == member["id"])
+
+        front_changed = await temp_repo.replace_front_members(
+            [member["id"]],
+            created_by=None,
+            event_type="test_front_replace",
+            details={"source": "sanity"},
+        )
+        _check("front replacement should report changed front", front_changed)
+        front_members = await temp_repo.get_current_front_members()
+        _check("front replacement should set current front", [row["id"] for row in front_members] == [member["id"]])
+        front_unchanged = await temp_repo.replace_front_members(
+            [member["id"]],
+            created_by=None,
+            event_type="test_front_replace",
+            details={"source": "sanity"},
+        )
+        _check("same front replacement should be a no-op", front_unchanged is False)
 
         deleted = await temp_repo.logical_delete_member(member["id"], created_by=1)
         _check("logical delete should succeed", deleted)
