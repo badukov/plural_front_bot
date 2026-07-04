@@ -25,10 +25,15 @@ from app.states import AddMemberState, DeleteMemberState
 router = Router()
 
 
-def _names_block(names: tuple[str, ...]) -> str:
+def _names_block(names: tuple[str, ...], limit: int = 30) -> str:
     if not names:
         return "-"
-    return "\n".join(f"- {name}" for name in names)
+    shown = names[:limit]
+    lines = [f"- {name}" for name in shown]
+    hidden = len(names) - len(shown)
+    if hidden > 0:
+        lines.append(f"... ещё {hidden}")
+    return "\n".join(lines)
 
 
 def _is_skip(text: str) -> bool:

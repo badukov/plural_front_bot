@@ -245,7 +245,7 @@ class FloralityClient:
                 else:
                     skipped += 1
             elif action == "missing":
-                missing_local_names.append(name)
+                continue
             else:
                 skipped += 1
 

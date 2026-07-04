@@ -159,9 +159,9 @@ TEXTS = {
         "it": "Controllo Florality avviato...",
     },
     "florality_import_done": {
-        "ru": "Проверка Florality завершена.\n\nИмпортированы фронтеры:\n{imported_front}\n\nИзменены во Florality:\n{changed}\n\nЕсть во Florality, нет локально:\n{missing_local}\n\nЕсть локально, нет в активном Florality:\n{missing_remote}\n\nБез изменений: {unchanged}\nПропущено: {skipped}\nБекап: {backup}",
-        "en": "Florality check finished.\n\nImported fronters:\n{imported_front}\n\nChanged in Florality:\n{changed}\n\nIn Florality, missing locally:\n{missing_local}\n\nLocal, missing from active Florality:\n{missing_remote}\n\nUnchanged: {unchanged}\nSkipped: {skipped}\nBackup: {backup}",
-        "it": "Controllo Florality completato.\n\nFronter importati:\n{imported_front}\n\nModificati in Florality:\n{changed}\n\nIn Florality, assenti localmente:\n{missing_local}\n\nLocali, assenti da Florality attivo:\n{missing_remote}\n\nSenza modifiche: {unchanged}\nSaltati: {skipped}\nBackup: {backup}",
+        "ru": "Проверка Florality завершена.\n\nИмпортированы отсутствующие фронтеры:\n{imported_front}\n\nИзменены во Florality:\n{changed}\n\nФронтеры Florality, которых нет локально:\n{missing_local}\n\nЕсть локально, нет в активном Florality:\n{missing_remote}\n\nБез изменений: {unchanged}\nПропущено: {skipped}\nБекап: {backup}",
+        "en": "Florality check finished.\n\nImported missing fronters:\n{imported_front}\n\nChanged in Florality:\n{changed}\n\nFlorality fronters missing locally:\n{missing_local}\n\nLocal, missing from active Florality:\n{missing_remote}\n\nUnchanged: {unchanged}\nSkipped: {skipped}\nBackup: {backup}",
+        "it": "Controllo Florality completato.\n\nFronter assenti importati:\n{imported_front}\n\nModificati in Florality:\n{changed}\n\nFronter Florality assenti localmente:\n{missing_local}\n\nLocali, assenti da Florality attivo:\n{missing_remote}\n\nSenza modifiche: {unchanged}\nSaltati: {skipped}\nBackup: {backup}",
     },
     "manual_add_disabled": {
         "ru": "Ручное добавление временно отключено. Используйте импорт из Florality.",

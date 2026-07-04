@@ -560,19 +560,21 @@ class Repository:
         if existing["id"] in deleted_ids and not remote_member.get("deletedAt"):
             return existing, "missing"
 
+        comparisons: list[tuple[str, str | int]] = []
         name = str(remote_member.get("name") or remote_member.get("displayName") or "").strip()
-        values = {
-            "name": name,
-            "pronouns": str(remote_member.get("pronouns") or ""),
-            "description": str(remote_member.get("about") or ""),
-            "avatar_url": str(remote_member.get("avatar") or ""),
-            "is_archived": 1 if (remote_member.get("deletedAt") or existing.get("is_archived")) else 0,
-            "archived_reason": (
-                "Deleted in Florality"
-                if remote_member.get("deletedAt")
-                else str(existing.get("archived_reason") or "")
-            ),
-        }
+        if name:
+            comparisons.append(("name", name))
+        if "pronouns" in remote_member:
+            comparisons.append(("pronouns", str(remote_member.get("pronouns") or "")))
+        if "about" in remote_member:
+            comparisons.append(("description", str(remote_member.get("about") or "")))
+        if "avatar" in remote_member:
+            comparisons.append(("avatar_url", str(remote_member.get("avatar") or "")))
+        if "deletedAt" in remote_member:
+            comparisons.append(("is_archived", 1 if remote_member.get("deletedAt") else 0))
+            if remote_member.get("deletedAt"):
+                comparisons.append(("archived_reason", "Deleted in Florality"))
+
         comparable = {
             "name": existing.get("name") or "",
             "pronouns": existing.get("pronouns") or "",
@@ -581,7 +583,7 @@ class Repository:
             "is_archived": 1 if existing.get("is_archived") else 0,
             "archived_reason": existing.get("archived_reason") or "",
         }
-        return existing, "unchanged" if all(comparable[key] == values[key] for key in comparable) else "changed"
+        return existing, "unchanged" if all(comparable[key] == value for key, value in comparisons) else "changed"
 
     async def upsert_florality_member(self, remote_member: dict[str, Any], remote_id: str) -> tuple[dict[str, Any], str]:
         name = str(remote_member.get("name") or remote_member.get("displayName") or "").strip()
