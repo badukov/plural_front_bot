@@ -443,6 +443,40 @@ class Repository:
             cursor = await db.execute("SELECT * FROM members WHERE id=?", (member_id,))
             return _row_to_dict(await cursor.fetchone())
 
+    async def get_external_id(self, provider: str, entity_type: str, local_id: str) -> str | None:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT remote_id
+                FROM external_ids
+                WHERE provider=? AND entity_type=? AND local_id=?
+                """,
+                (provider, entity_type, local_id),
+            )
+            row = await cursor.fetchone()
+            return str(row["remote_id"]) if row else None
+
+    async def set_external_id(
+        self,
+        provider: str,
+        entity_type: str,
+        local_id: str,
+        remote_id: str,
+    ) -> None:
+        now = _now_ms()
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO external_ids(provider, entity_type, local_id, remote_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(provider, entity_type, local_id) DO UPDATE SET
+                    remote_id=excluded.remote_id,
+                    updated_at=excluded.updated_at
+                """,
+                (provider, entity_type, local_id, remote_id, now, now),
+            )
+            await db.commit()
+
     async def get_group_by_name(self, name: str, parent_id: str | None = None) -> dict[str, Any] | None:
         async with self._connect() as db:
             if parent_id is None:

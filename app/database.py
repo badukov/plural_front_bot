@@ -72,10 +72,21 @@ CREATE TABLE IF NOT EXISTS events (
     details_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS external_ids (
+    provider TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    local_id TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (provider, entity_type, local_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_members_name ON members(name);
 CREATE INDEX IF NOT EXISTS idx_member_groups_member ON member_groups(member_id);
 CREATE INDEX IF NOT EXISTS idx_member_groups_group ON member_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_front_state_fronted_at ON front_state(fronted_at);
+CREATE INDEX IF NOT EXISTS idx_external_ids_remote ON external_ids(provider, entity_type, remote_id);
 """
 
 

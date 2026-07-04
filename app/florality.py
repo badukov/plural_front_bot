@@ -1,0 +1,222 @@
+import asyncio
+import json
+import logging
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from app.config import settings
+from app.repository import repo
+
+
+PROVIDER = "florality"
+MEMBER_ENTITY = "member"
+
+logger = logging.getLogger(__name__)
+
+
+def _normalized_name(value: object) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _remote_member_id(member: dict[str, Any]) -> str | None:
+    value = member.get("_id") or member.get("id")
+    return str(value) if value else None
+
+
+class FloralityClient:
+    def __init__(self) -> None:
+        self.base_url = settings.florality_api_base_url
+        self.token = settings.florality_api_token
+
+    @property
+    def enabled(self) -> bool:
+        return bool(settings.florality_sync_enabled and self.token and self.base_url)
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        if not self.enabled:
+            return None
+
+        return await asyncio.to_thread(self._request_sync, method, path, payload)
+
+    def _request_sync(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        body = None
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
+            "User-Agent": "plural-front-bot/1.0",
+        }
+        if payload is not None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+
+        request = Request(
+            f"{self.base_url}{path}",
+            data=body,
+            headers=headers,
+            method=method,
+        )
+
+        try:
+            with urlopen(request, timeout=20) as response:
+                raw = response.read()
+                if not raw:
+                    return None
+                return json.loads(raw.decode("utf-8"))
+        except HTTPError as error:
+            logger.warning("Florality request failed: %s %s -> HTTP %s", method, path, error.code)
+            return None
+        except URLError as error:
+            logger.warning("Florality request failed: %s %s -> %s", method, path, error.reason)
+            return None
+        except TimeoutError:
+            logger.warning("Florality request timed out: %s %s", method, path)
+            return None
+        except json.JSONDecodeError:
+            logger.warning("Florality response was not valid JSON: %s %s", method, path)
+            return None
+
+    async def list_members(self) -> list[dict[str, Any]] | None:
+        data = await self._request("GET", "/members")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return None
+
+    async def _find_remote_member(
+        self,
+        local_member: dict[str, Any],
+        remote_members: list[dict[str, Any]],
+    ) -> tuple[str | None, bool]:
+        name = _normalized_name(local_member.get("name"))
+        if not name:
+            return None, False
+
+        matches = []
+        for member in remote_members:
+            remote_name = _normalized_name(member.get("name"))
+            remote_display_name = _normalized_name(member.get("displayName"))
+            if name in {remote_name, remote_display_name}:
+                remote_id = _remote_member_id(member)
+                if remote_id:
+                    matches.append(remote_id)
+
+        unique_matches = sorted(set(matches))
+        if len(unique_matches) == 1:
+            return unique_matches[0], False
+        if len(unique_matches) > 1:
+            logger.warning("Florality member mapping skipped: duplicate remote names for local id %s", local_member.get("id"))
+            return None, True
+        return None, False
+
+    async def ensure_member(
+        self,
+        local_member: dict[str, Any],
+        remote_members: list[dict[str, Any]] | None = None,
+    ) -> str | None:
+        if not self.enabled:
+            return None
+
+        local_id = str(local_member.get("id") or "")
+        if not local_id:
+            return None
+
+        mapped_id = await repo.get_external_id(PROVIDER, MEMBER_ENTITY, local_id)
+        if mapped_id:
+            return mapped_id
+
+        remote_members = remote_members if remote_members is not None else await self.list_members()
+        if remote_members is None:
+            logger.warning("Florality member sync skipped: remote members list unavailable")
+            return None
+
+        remote_id, has_duplicates = await self._find_remote_member(local_member, remote_members)
+        if remote_id:
+            await repo.set_external_id(PROVIDER, MEMBER_ENTITY, local_id, remote_id)
+            return remote_id
+        if has_duplicates:
+            return None
+
+        payload = {
+            "name": str(local_member.get("name") or "").strip(),
+        }
+        pronouns = str(local_member.get("pronouns") or "").strip()
+        description = str(local_member.get("description") or "").strip()
+        if pronouns:
+            payload["pronouns"] = pronouns
+        if description:
+            payload["about"] = description
+
+        if not payload["name"]:
+            return None
+
+        created = await self._request("POST", "/members", payload)
+        if isinstance(created, dict):
+            remote_id = _remote_member_id(created)
+            if remote_id:
+                await repo.set_external_id(PROVIDER, MEMBER_ENTITY, local_id, remote_id)
+                return remote_id
+
+        logger.warning("Florality member creation skipped or failed for local id %s", local_id)
+        return None
+
+    async def sync_created_member(self, local_member: dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        try:
+            await self.ensure_member(local_member)
+        except Exception:
+            logger.exception("Unexpected Florality member sync error")
+
+    async def sync_front(self, front_members: list[dict[str, Any]]) -> None:
+        if not self.enabled:
+            return
+
+        try:
+            if not front_members:
+                await self._request("DELETE", "/front")
+                return
+
+            remote_members = await self.list_members()
+            if remote_members is None:
+                logger.warning("Florality front sync skipped: remote members list unavailable")
+                return
+
+            remote_ids: list[str] = []
+            for member in front_members:
+                remote_id = await self.ensure_member(member, remote_members)
+                if not remote_id:
+                    logger.warning("Florality front sync skipped: member mapping failed for local id %s", member.get("id"))
+                    return
+                if remote_id not in remote_ids:
+                    remote_ids.append(remote_id)
+
+            await self._request("DELETE", "/front")
+            for remote_id in remote_ids:
+                await self._request(
+                    "POST",
+                    "/front/members",
+                    {"memberId": remote_id},
+                )
+        except Exception:
+            logger.exception("Unexpected Florality front sync error")
+
+
+florality = FloralityClient()
+
+
+async def sync_florality_member(member: dict[str, Any]) -> None:
+    await florality.sync_created_member(member)
+
+
+async def sync_florality_front(front_members: list[dict[str, Any]]) -> None:
+    await florality.sync_front(front_members)

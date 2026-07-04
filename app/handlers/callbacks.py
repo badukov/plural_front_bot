@@ -3,6 +3,7 @@ from aiogram.types import CallbackQuery
 
 from app.access import is_admin_callback
 from app.broadcast import broadcast_by_language
+from app.florality import sync_florality_front
 from app.formatters import current_status_text, format_front_notification, split_long_message
 from app.i18n import lang_from_callback, t
 from app.repository import repo
@@ -51,6 +52,7 @@ async def set_front_callback(callback: CallbackQuery) -> None:
     status = current_status_text(front_members, lang)
 
     if added:
+        await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,
             lambda user_lang: format_front_notification(
@@ -90,6 +92,7 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
 
     if removed:
         text = t("front_removed", lang, name=member["name"], status=status)
+        await sync_florality_front(front_members)
         await broadcast_by_language(
             callback.bot,
             lambda user_lang: format_front_notification(

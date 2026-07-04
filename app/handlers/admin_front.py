@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from app.access import is_admin_message
 from app.broadcast import broadcast_by_language
+from app.florality import sync_florality_front
 from app.formatters import format_front_notification
 from app.i18n import is_button_text, lang_from_message, t
 from app.keyboards import (
@@ -102,6 +103,7 @@ async def set_blur(message: Message) -> None:
         return
 
     await repo.clear_front(created_by=message.from_user.id if message.from_user else None)
+    await sync_florality_front([])
     await broadcast_by_language(
         message.bot,
         lambda user_lang: format_front_notification(t("front_cleared_event", user_lang), [], user_lang),

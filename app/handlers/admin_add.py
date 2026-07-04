@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
+from app.florality import sync_florality_front, sync_florality_member
 from app.formatters import format_member_brief
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
@@ -125,6 +126,7 @@ async def _finish_member(callback: CallbackQuery, state: FSMContext) -> None:
         group_ids=group_ids,
         created_by=callback.from_user.id if callback.from_user else None,
     )
+    await sync_florality_member(member)
     await state.clear()
     await callback.answer(t("member_added_answer", lang))
     if callback.message:
@@ -239,6 +241,7 @@ async def delete_member_confirm(callback: CallbackQuery) -> None:
         return
 
     await repo.logical_delete_member(member_id, callback.from_user.id if callback.from_user else None)
+    await sync_florality_front(await repo.get_current_front_members())
     await callback.answer(t("ready", lang))
     if callback.message:
         await callback.message.edit_text(t("deleted", lang, name=member["name"]))

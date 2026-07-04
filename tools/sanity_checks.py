@@ -317,6 +317,10 @@ async def main() -> None:
         exported_group = next(group for group in export["groups"] if group.get("_id") == "role1")
         _check("export should restore group members links", member["id"] in exported_group.get("members", []))
 
+        await temp_repo.set_external_id("florality", "member", member["id"], "remote-member-id")
+        remote_id = await temp_repo.get_external_id("florality", "member", member["id"])
+        _check("external id mapping should be stored", remote_id == "remote-member-id")
+
         deleted = await temp_repo.logical_delete_member(member["id"], created_by=1)
         _check("logical delete should succeed", deleted)
         deleted_group = await temp_repo.find_deleted_group()
@@ -352,8 +356,11 @@ async def main() -> None:
         cur = con.cursor()
         cur.execute("PRAGMA table_info(users)")
         user_columns = {row[1] for row in cur.fetchall()}
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='external_ids'")
+        external_ids_exists = cur.fetchone() is not None
         con.close()
         _check("users migration should add language_code", "language_code" in user_columns)
+        _check("init should create external id mappings table", external_ids_exists)
 
     print("Sanity checks passed.")
     print(
