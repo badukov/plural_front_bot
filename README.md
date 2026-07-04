@@ -48,11 +48,12 @@ AUTO_IMPORT_ON_START=false
 
 ```env
 FLORALITY_SYNC_ENABLED=true
+FLORALITY_SYNC_FRONT_ENABLED=true
 FLORALITY_API_TOKEN=flv1_...
 FLORALITY_API_BASE_URL=https://api.floralitys.com/api/v1
 ```
 
-Ключу нужны права на чтение/запись members и front. Бот хранит локальное соответствие `member_id` к Florality ID в отдельной служебной таблице и не меняет структуру Simply Plural-данных.
+Ключу нужны права на чтение/запись members и front. Если у ключа пока нет прав на front, можно временно поставить `FLORALITY_SYNC_FRONT_ENABLED=false`: новые личности продолжат синхронизироваться, а фронт не будет отправляться во Florality. Бот хранит локальное соответствие `member_id` к Florality ID в отдельной служебной таблице и не меняет структуру Simply Plural-данных.
 
 ## Запуск на Linux / VPS
 

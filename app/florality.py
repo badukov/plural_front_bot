@@ -28,10 +28,15 @@ class FloralityClient:
     def __init__(self) -> None:
         self.base_url = settings.florality_api_base_url
         self.token = settings.florality_api_token
+        self._front_sync_forbidden = False
 
     @property
     def enabled(self) -> bool:
         return bool(settings.florality_sync_enabled and self.token and self.base_url)
+
+    @property
+    def front_enabled(self) -> bool:
+        return bool(self.enabled and settings.florality_sync_front_enabled and not self._front_sync_forbidden)
 
     async def _request(
         self,
@@ -74,7 +79,25 @@ class FloralityClient:
                     return None
                 return json.loads(raw.decode("utf-8"))
         except HTTPError as error:
-            logger.warning("Florality request failed: %s %s -> HTTP %s", method, path, error.code)
+            code, message = self._read_error(error)
+            if error.code == 403 and path.startswith("/front"):
+                self._front_sync_forbidden = True
+                logger.warning(
+                    "Florality front sync disabled until restart: %s %s -> HTTP 403 (%s: %s)",
+                    method,
+                    path,
+                    code,
+                    message,
+                )
+            else:
+                logger.warning(
+                    "Florality request failed: %s %s -> HTTP %s (%s: %s)",
+                    method,
+                    path,
+                    error.code,
+                    code,
+                    message,
+                )
             return None
         except URLError as error:
             logger.warning("Florality request failed: %s %s -> %s", method, path, error.reason)
@@ -85,6 +108,17 @@ class FloralityClient:
         except json.JSONDecodeError:
             logger.warning("Florality response was not valid JSON: %s %s", method, path)
             return None
+
+    def _read_error(self, error: HTTPError) -> tuple[str, str]:
+        try:
+            raw = error.read()
+            data = json.loads(raw.decode("utf-8")) if raw else {}
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            data = {}
+
+        code = str(data.get("code") or "HTTP_ERROR") if isinstance(data, dict) else "HTTP_ERROR"
+        message = str(data.get("message") or "No JSON error message") if isinstance(data, dict) else "No JSON error message"
+        return code[:80], message[:240]
 
     async def list_members(self) -> list[dict[str, Any]] | None:
         data = await self._request("GET", "/members")
@@ -178,7 +212,7 @@ class FloralityClient:
             logger.exception("Unexpected Florality member sync error")
 
     async def sync_front(self, front_members: list[dict[str, Any]]) -> None:
-        if not self.enabled:
+        if not self.front_enabled:
             return
 
         try:

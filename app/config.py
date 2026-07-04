@@ -45,6 +45,7 @@ class Settings:
     florality_api_token: str
     florality_api_base_url: str
     florality_sync_enabled: bool
+    florality_sync_front_enabled: bool
 
 
 settings = Settings(
@@ -59,6 +60,7 @@ settings = Settings(
     florality_api_token=os.getenv("FLORALITY_API_TOKEN", "").strip(),
     florality_api_base_url=os.getenv("FLORALITY_API_BASE_URL", "https://api.floralitys.com/api/v1").strip().rstrip("/"),
     florality_sync_enabled=_bool("FLORALITY_SYNC_ENABLED", True),
+    florality_sync_front_enabled=_bool("FLORALITY_SYNC_FRONT_ENABLED", True),
 )
 
 if not settings.bot_token:
