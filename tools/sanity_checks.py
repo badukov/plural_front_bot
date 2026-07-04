@@ -294,7 +294,19 @@ async def main() -> None:
             any(row["id"] == member["id"] for row in found),
         )
 
-        await temp_repo.upsert_user(telegram_user_id=1, chat_id=1, username=None, first_name=None, is_admin=True)
+        await temp_repo.upsert_user(
+            telegram_user_id=1,
+            chat_id=1,
+            username=None,
+            first_name=None,
+            is_admin=True,
+            language_code="en",
+        )
+        user = await temp_repo.get_user(1)
+        _check("user language should be stored", user["language_code"] == "en")
+        await temp_repo.update_user_language(1, "it")
+        user = await temp_repo.get_user(1)
+        _check("user language should update", user["language_code"] == "it")
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should disable initially subscribed user", subscribed is False)
         subscribed = await temp_repo.toggle_user_subscribed(1)
@@ -314,6 +326,34 @@ async def main() -> None:
             "logically deleted member should be hidden from default search",
             all(row["id"] != member["id"] for row in after_delete),
         )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "old_users.sqlite3"
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute(
+            """
+            CREATE TABLE users (
+                telegram_user_id INTEGER PRIMARY KEY,
+                chat_id INTEGER NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                subscribed INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        con.commit()
+        con.close()
+        await init_db(db_path)
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute("PRAGMA table_info(users)")
+        user_columns = {row[1] for row in cur.fetchall()}
+        con.close()
+        _check("users migration should add language_code", "language_code" in user_columns)
 
     print("Sanity checks passed.")
     print(

@@ -1,9 +1,12 @@
 import logging
+import inspect
+from collections.abc import Awaitable, Callable
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 from app.formatters import split_long_message
+from app.i18n import normalize_lang
 from app.repository import repo
 
 
@@ -11,10 +14,17 @@ log = logging.getLogger(__name__)
 
 
 async def broadcast(bot: Bot, text: str) -> None:
+    await broadcast_by_language(bot, lambda _lang: text)
+
+
+async def broadcast_by_language(bot: Bot, text_builder: Callable[[str], str | Awaitable[str]]) -> None:
     users = await repo.get_subscribed_users()
     for user in users:
         chat_id = user["chat_id"]
         telegram_user_id = user["telegram_user_id"]
+        lang = normalize_lang(user.get("language_code"))
+        maybe_text = text_builder(lang)
+        text = await maybe_text if inspect.isawaitable(maybe_text) else maybe_text
         try:
             for chunk in split_long_message(text):
                 await bot.send_message(chat_id=chat_id, text=chunk)

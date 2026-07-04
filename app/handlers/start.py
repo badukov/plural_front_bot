@@ -24,6 +24,7 @@ async def start(message: Message) -> None:
         username=message.from_user.username,
         first_name=message.from_user.first_name,
         is_admin=is_admin,
+        language_code=message.from_user.language_code,
     )
 
     members_count = await repo.count_members()

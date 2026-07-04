@@ -24,7 +24,10 @@ async def toggle_notifications(message: Message) -> None:
             username=message.from_user.username,
             first_name=message.from_user.first_name,
             is_admin=is_admin_message(message),
+            language_code=message.from_user.language_code,
         )
+    else:
+        await repo.update_user_language(message.from_user.id, message.from_user.language_code)
 
     subscribed = await repo.toggle_user_subscribed(message.from_user.id)
     text = t("notifications_on" if subscribed else "notifications_off", lang)

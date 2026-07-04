@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.types import CallbackQuery
 
 from app.access import is_admin_callback
-from app.broadcast import broadcast
+from app.broadcast import broadcast_by_language
 from app.formatters import current_status_text, format_front_notification, split_long_message
 from app.i18n import lang_from_callback, t
 from app.repository import repo
@@ -51,9 +51,13 @@ async def set_front_callback(callback: CallbackQuery) -> None:
     status = current_status_text(front_members, lang)
 
     if added:
-        await broadcast(
+        await broadcast_by_language(
             callback.bot,
-            await format_front_notification(t("front_added_event", lang, name=member["name"]), front_members, lang),
+            lambda user_lang: format_front_notification(
+                t("front_added_event", user_lang, name=member["name"]),
+                front_members,
+                user_lang,
+            ),
         )
         answer_text = t("front_added", lang, name=member["name"], status=status)
     else:
@@ -86,9 +90,13 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
 
     if removed:
         text = t("front_removed", lang, name=member["name"], status=status)
-        await broadcast(
+        await broadcast_by_language(
             callback.bot,
-            await format_front_notification(t("front_removed_event", lang, name=member["name"]), front_members, lang),
+            lambda user_lang: format_front_notification(
+                t("front_removed_event", user_lang, name=member["name"]),
+                front_members,
+                user_lang,
+            ),
         )
     else:
         text = t("not_in_front", lang, name=member["name"], status=status)

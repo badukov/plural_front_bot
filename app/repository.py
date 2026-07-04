@@ -235,20 +235,22 @@ class Repository:
         username: str | None,
         first_name: str | None,
         is_admin: bool,
+        language_code: str | None = None,
     ) -> None:
         now = _now_ms()
         async with self._connect() as db:
             await db.execute(
                 """
                 INSERT INTO users (
-                    telegram_user_id, chat_id, username, first_name, is_admin,
+                    telegram_user_id, chat_id, username, first_name, language_code, is_admin,
                     subscribed, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(telegram_user_id) DO UPDATE SET
                     chat_id=excluded.chat_id,
                     username=excluded.username,
                     first_name=excluded.first_name,
+                    language_code=excluded.language_code,
                     is_admin=excluded.is_admin,
                     subscribed=1,
                     updated_at=excluded.updated_at
@@ -258,10 +260,19 @@ class Repository:
                     chat_id,
                     username,
                     first_name,
+                    language_code,
                     1 if is_admin else 0,
                     now,
                     now,
                 ),
+            )
+            await db.commit()
+
+    async def update_user_language(self, telegram_user_id: int, language_code: str | None) -> None:
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE users SET language_code=?, updated_at=? WHERE telegram_user_id=?",
+                (language_code, _now_ms(), telegram_user_id),
             )
             await db.commit()
 

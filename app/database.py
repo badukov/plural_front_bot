@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS users (
     chat_id INTEGER NOT NULL,
     username TEXT,
     first_name TEXT,
+    language_code TEXT,
     is_admin INTEGER NOT NULL DEFAULT 0,
     subscribed INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
@@ -82,4 +83,8 @@ async def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA)
+        cursor = await db.execute("PRAGMA table_info(users)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "language_code" not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN language_code TEXT")
         await db.commit()

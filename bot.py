@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from app.config import settings
 from app.database import init_db
 from app.import_sp import import_simply_plural_export
+from app.user_context import UserLanguageMiddleware
 from app.handlers import (
     start,
     info,
@@ -44,6 +45,9 @@ async def main() -> None:
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
+    language_middleware = UserLanguageMiddleware()
+    dp.message.middleware(language_middleware)
+    dp.callback_query.middleware(language_middleware)
 
     dp.include_router(start.router)
     dp.include_router(info.router)

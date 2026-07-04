@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.access import is_admin_message
-from app.broadcast import broadcast
+from app.broadcast import broadcast_by_language
 from app.formatters import format_front_notification
 from app.i18n import is_button_text, lang_from_message, t
 from app.keyboards import (
@@ -102,5 +102,8 @@ async def set_blur(message: Message) -> None:
         return
 
     await repo.clear_front(created_by=message.from_user.id if message.from_user else None)
-    await broadcast(message.bot, await format_front_notification(t("front_cleared_event", lang), [], lang))
+    await broadcast_by_language(
+        message.bot,
+        lambda user_lang: format_front_notification(t("front_cleared_event", user_lang), [], user_lang),
+    )
     await message.answer(t("front_cleared_status", lang), reply_markup=main_keyboard(True, lang))
