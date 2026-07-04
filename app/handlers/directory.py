@@ -2,13 +2,17 @@ from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
+from app.access import is_admin_callback
+from app.broadcast import broadcast_by_language
 from app.config import settings
-from app.formatters import format_member_info, split_long_message
+from app.florality import sync_florality_front
+from app.formatters import current_status_text, format_front_notification, format_member_info, split_long_message
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
     directory_categories_keyboard,
     directory_category_keyboard,
     directory_home_keyboard,
+    directory_member_keyboard,
     directory_members_keyboard,
 )
 from app.repository import repo
@@ -309,4 +313,85 @@ async def directory_member_info(callback: CallbackQuery) -> None:
 
     await callback.answer()
     text = await format_member_info(member, lang)
-    await _show_chunks(callback, text, reply_markup=directory_home_keyboard(lang))
+    await _show_chunks(
+        callback,
+        text,
+        reply_markup=directory_member_keyboard(member_id, is_admin_callback(callback), lang),
+    )
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:addfront:"))
+async def directory_add_to_front(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    member_id = (callback.data or "")[len("dir:addfront:") :]
+    member = await repo.get_member_by_id(member_id)
+    if not member:
+        await callback.answer(t("member_not_found", lang), show_alert=True)
+        return
+
+    added = await repo.add_to_front(member_id, callback.from_user.id if callback.from_user else None)
+    front_members = await repo.get_current_front_members()
+    status = current_status_text(front_members, lang)
+    if added:
+        await sync_florality_front(front_members)
+        await broadcast_by_language(
+            callback.bot,
+            lambda user_lang: format_front_notification(
+                t("front_added_event", user_lang, name=member["name"]),
+                front_members,
+                user_lang,
+            ),
+        )
+        text = t("front_added", lang, name=member["name"], status=status)
+    else:
+        text = t("already_front", lang, name=member["name"], status=status)
+
+    await callback.answer(t("ready", lang))
+    if callback.message:
+        await callback.message.answer(text)
+
+
+@router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:replacefront:"))
+async def directory_replace_front(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+
+    member_id = (callback.data or "")[len("dir:replacefront:") :]
+    member = await repo.get_member_by_id(member_id)
+    if not member:
+        await callback.answer(t("member_not_found", lang), show_alert=True)
+        return
+
+    changed = await repo.replace_front_members(
+        [member_id],
+        created_by=callback.from_user.id if callback.from_user else None,
+        event_type="front_replaced",
+        details={"source": "directory"},
+    )
+    front_members = await repo.get_current_front_members()
+    status = current_status_text(front_members, lang)
+    if changed:
+        await sync_florality_front(front_members)
+        await broadcast_by_language(
+            callback.bot,
+            lambda user_lang: format_front_notification(
+                t("front_replaced_event", user_lang, name=member["name"]),
+                front_members,
+                user_lang,
+            ),
+        )
+
+    await callback.answer(t("ready", lang))
+    if callback.message:
+        text = (
+            t("front_replaced", lang, name=member["name"], status=status)
+            if changed
+            else t("already_front", lang, name=member["name"], status=status)
+        )
+        await callback.message.answer(text)

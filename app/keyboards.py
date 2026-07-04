@@ -99,7 +99,6 @@ def add_member_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t("import_florality", lang), callback_data="add:import_florality")],
-            [InlineKeyboardButton(text=t("delete_member", lang), callback_data="add:delete")],
             [InlineKeyboardButton(text=t("export_json", lang), callback_data="add:export")],
             [InlineKeyboardButton(text=t("cancel", lang), callback_data="add:cancel")],
         ]
@@ -258,6 +257,19 @@ def directory_members_keyboard(
         rows.append(nav)
 
     rows.append([InlineKeyboardButton(text=t("back_to_choice", lang), callback_data=back_callback_data)])
+    rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def directory_member_keyboard(member_id: str, is_admin: bool, lang: str = "ru") -> InlineKeyboardMarkup:
+    rows = []
+    if is_admin:
+        rows.extend(
+            [
+                [InlineKeyboardButton(text=t("add_to_front", lang), callback_data=f"dir:addfront:{member_id}")],
+                [InlineKeyboardButton(text=t("replace_front", lang), callback_data=f"dir:replacefront:{member_id}")],
+            ]
+        )
     rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

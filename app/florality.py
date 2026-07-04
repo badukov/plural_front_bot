@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from aiogram import Bot
 
+from app.backups import create_database_backup
 from app.broadcast import broadcast_by_language
 from app.config import settings
 from app.formatters import format_front_notification
@@ -26,11 +27,13 @@ class FloralityImportResult:
     created: int = 0
     updated: int = 0
     unchanged: int = 0
+    deleted: int = 0
     skipped: int = 0
+    backup_path: str = ""
 
     @property
     def total(self) -> int:
-        return self.created + self.updated + self.unchanged + self.skipped
+        return self.created + self.updated + self.unchanged + self.deleted + self.skipped
 
 
 def _normalized_name(value: object) -> str:
@@ -160,12 +163,19 @@ class FloralityClient:
             return [item for item in data if isinstance(item, dict)]
         return None
 
-    async def import_member_from_florality(self, remote_member: dict[str, Any]) -> dict[str, Any] | None:
+    async def import_member_from_florality(
+        self,
+        remote_member: dict[str, Any],
+        create_backup: bool = False,
+    ) -> dict[str, Any] | None:
         remote_id = _remote_member_id(remote_member)
         if not remote_id:
             logger.warning("Florality member import skipped: remote id is missing")
             return None
         try:
+            if create_backup:
+                backup_path = await create_database_backup("florality_front_import")
+                logger.info("Database backup created before Florality front import: %s", backup_path.name)
             member, _action = await repo.upsert_florality_member(remote_member, remote_id)
             return member
         except ValueError:
@@ -183,12 +193,17 @@ class FloralityClient:
         if remote_members is None:
             return FloralityImportResult(skipped=1)
 
-        counts = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
+        backup_path = await create_database_backup("florality_import")
+        logger.info("Database backup created before Florality import: %s", backup_path.name)
+
+        counts = {"created": 0, "updated": 0, "unchanged": 0, "deleted": 0, "skipped": 0}
+        active_remote_ids: set[str] = set()
         for remote_member in remote_members:
             remote_id = _remote_member_id(remote_member)
             if not remote_id:
                 counts["skipped"] += 1
                 continue
+            active_remote_ids.add(remote_id)
             try:
                 _member, action = await repo.upsert_florality_member(remote_member, remote_id)
                 counts[action] += 1
@@ -198,7 +213,20 @@ class FloralityClient:
                 counts["skipped"] += 1
                 logger.exception("Unexpected Florality member import error")
 
-        return FloralityImportResult(**counts)
+        deleted_ids = await repo.get_deleted_member_ids()
+        mappings = await repo.get_external_id_mappings(PROVIDER, MEMBER_ENTITY)
+        for mapping in mappings:
+            local_id = str(mapping.get("local_id") or "")
+            remote_id = str(mapping.get("remote_id") or "")
+            if not local_id or not remote_id or remote_id in active_remote_ids or local_id in deleted_ids:
+                continue
+            member = await repo.get_member_by_id(local_id)
+            if not member:
+                continue
+            if await repo.logical_delete_member(local_id, created_by=None):
+                counts["deleted"] += 1
+
+        return FloralityImportResult(**counts, backup_path=str(backup_path))
 
     async def get_front(self) -> list[dict[str, Any]] | None:
         if not self.front_pull_enabled:
@@ -389,7 +417,7 @@ class FloralityClient:
                 for remote_member in remote_front_members:
                     local_member = await self._resolve_local_front_member(remote_member)
                     if not local_member:
-                        local_member = await self.import_member_from_florality(remote_member)
+                        local_member = await self.import_member_from_florality(remote_member, create_backup=True)
                     if not local_member:
                         logger.warning(
                             "Florality front pull skipped: remote member is not mapped to a local member"

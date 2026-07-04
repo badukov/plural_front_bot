@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
-from app.florality import import_florality_members, sync_florality_front, sync_florality_member
+from app.florality import import_florality_members, sync_florality_member
 from app.formatters import format_member_brief
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
@@ -16,8 +16,6 @@ from app.keyboards import (
     add_category_selected_keyboard,
     add_choice_keyboard,
     add_member_menu_keyboard,
-    delete_confirm_keyboard,
-    delete_results_keyboard,
     main_keyboard,
 )
 from app.repository import repo
@@ -193,7 +191,9 @@ async def import_from_florality(callback: CallbackQuery) -> None:
         created=result.created,
         updated=result.updated,
         unchanged=result.unchanged,
+        deleted=result.deleted,
         skipped=result.skipped,
+        backup=Path(result.backup_path).name if result.backup_path else "-",
     )
     if callback.message:
         await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))
@@ -207,10 +207,9 @@ async def delete_member_start(callback: CallbackQuery, state: FSMContext) -> Non
         return
 
     await state.clear()
-    await state.set_state(DeleteMemberState.waiting_for_query)
-    await callback.answer()
+    await callback.answer(t("manual_delete_disabled", lang), show_alert=True)
     if callback.message:
-        await callback.message.edit_text(t("delete_prompt", lang))
+        await callback.message.edit_text(t("manual_delete_disabled", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.message(DeleteMemberState.waiting_for_query)
@@ -220,18 +219,8 @@ async def delete_member_search(message: Message, state: FSMContext) -> None:
         await state.clear()
         return
 
-    query = (message.text or "").strip()
-    if not query:
-        await message.answer(t("enter_some_name", lang))
-        return
-
-    matches = await repo.search_members(query, limit=settings.search_limit)
-    if not matches:
-        await message.answer(t("nothing_found", lang))
-        return
-
     await state.clear()
-    await message.answer(t("choose_delete", lang), reply_markup=delete_results_keyboard(matches, lang))
+    await message.answer(t("manual_delete_disabled", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("del:ask:"))
@@ -241,18 +230,9 @@ async def delete_member_ask(callback: CallbackQuery) -> None:
         await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
-    member_id = (callback.data or "").split(":", 2)[2]
-    member = await repo.get_member_by_id(member_id)
-    if not member:
-        await callback.answer(t("member_not_found", lang), show_alert=True)
-        return
-
-    await callback.answer()
+    await callback.answer(t("manual_delete_disabled", lang), show_alert=True)
     if callback.message:
-        await callback.message.edit_text(
-            t("delete_confirm", lang, name=member["name"]),
-            reply_markup=delete_confirm_keyboard(member_id, lang),
-        )
+        await callback.message.edit_text(t("manual_delete_disabled", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("del:confirm:"))
@@ -262,17 +242,9 @@ async def delete_member_confirm(callback: CallbackQuery) -> None:
         await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
-    member_id = (callback.data or "").split(":", 2)[2]
-    member = await repo.get_member_by_id(member_id)
-    if not member:
-        await callback.answer(t("member_not_found", lang), show_alert=True)
-        return
-
-    await repo.logical_delete_member(member_id, callback.from_user.id if callback.from_user else None)
-    await sync_florality_front(await repo.get_current_front_members())
-    await callback.answer(t("ready", lang))
+    await callback.answer(t("manual_delete_disabled", lang), show_alert=True)
     if callback.message:
-        await callback.message.edit_text(t("deleted", lang, name=member["name"]))
+        await callback.message.edit_text(t("manual_delete_disabled", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.message(AddMemberState.waiting_for_name)

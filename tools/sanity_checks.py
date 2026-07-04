@@ -21,6 +21,7 @@ from app.keyboards import (
     directory_categories_keyboard,
     directory_category_keyboard,
     directory_home_keyboard,
+    directory_member_keyboard,
     directory_members_keyboard,
     member_button_items,
     members_choice_keyboard,
@@ -169,6 +170,7 @@ async def main() -> None:
     buttons = member_button_items(matches)
     _assert_callback_data_is_safe(buttons)
     _assert_markup_callback_data_is_safe(directory_home_keyboard())
+    _assert_markup_callback_data_is_safe(directory_member_keyboard("member-id", is_admin=True))
 
     root_groups = await repo.list_child_groups(parent_id=None, limit=8)
     root_total = await repo.count_child_groups(parent_id=None)
@@ -389,6 +391,22 @@ async def main() -> None:
         _check(
             "logically deleted member should be hidden from default search",
             all(row["id"] != member["id"] for row in after_delete),
+        )
+        restored_member, restore_action = await temp_repo.upsert_florality_member(
+            {
+                "_id": "remote-member-id",
+                "name": "Temporary Test Member",
+                "pronouns": "they/them",
+                "about": "",
+                "avatar": "",
+            },
+            "remote-member-id",
+        )
+        _check("active Florality import should update a locally deleted mapped member", restore_action == "updated")
+        restored_search = await temp_repo.search_members("Temporary Test", limit=5)
+        _check(
+            "active Florality import should restore member from deleted group",
+            any(row["id"] == restored_member["id"] for row in restored_search),
         )
 
     with tempfile.TemporaryDirectory() as tmp:

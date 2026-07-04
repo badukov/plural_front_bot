@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 import time
@@ -497,6 +498,19 @@ class Repository:
             row = await cursor.fetchone()
             return str(row["local_id"]) if row else None
 
+    async def get_external_id_mappings(self, provider: str, entity_type: str) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT local_id, remote_id
+                FROM external_ids
+                WHERE provider=? AND entity_type=?
+                ORDER BY updated_at DESC
+                """,
+                (provider, entity_type),
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
     async def find_unique_member_by_names(self, names: list[str]) -> dict[str, Any] | None:
         normalized_names = {_normalize_search_text(name) for name in names if name and _normalize_search_text(name)}
         if not normalized_names:
@@ -539,8 +553,12 @@ class Repository:
                 ]
             )
 
-        cleaned_remote_id = EXTERNAL_ID_CLEANUP_RE.sub("_", remote_id).strip("_") or uuid.uuid4().hex
-        local_id = str(existing["id"]) if existing else f"florality_{cleaned_remote_id}"
+        cleaned_remote_id = EXTERNAL_ID_CLEANUP_RE.sub("_", remote_id).strip("_") or "member"
+        remote_digest = hashlib.sha1(remote_id.encode("utf-8")).hexdigest()[:10]
+        local_id = str(existing["id"]) if existing else f"florality_{cleaned_remote_id[:30]}_{remote_digest}"
+        was_deleted = False
+        if existing:
+            was_deleted = local_id in await self.get_deleted_member_ids()
         if existing:
             try:
                 raw = json.loads(existing.get("raw_json") or "{}")
@@ -605,6 +623,8 @@ class Repository:
                 "archived_reason": existing.get("archived_reason") or "",
             }
             action = "unchanged" if all(comparable[key] == values[key] for key in comparable) else "updated"
+            if was_deleted and not remote_member.get("deletedAt"):
+                action = "updated"
 
         async with self._connect() as db:
             if existing:
@@ -654,6 +674,8 @@ class Repository:
             await db.commit()
 
         await self.set_external_id("florality", "member", local_id, remote_id)
+        if not remote_member.get("deletedAt"):
+            await self.restore_member_from_deleted(local_id)
         member = await self.get_member_by_id(local_id)
         if member is None:
             raise RuntimeError("Imported Florality member was not found")
@@ -863,6 +885,38 @@ class Repository:
             )
             await db.commit()
         return True
+
+    async def restore_member_from_deleted(self, member_id: str, created_by: int | None = None) -> bool:
+        deleted_group = await self.find_deleted_group()
+        if not deleted_group:
+            return False
+        group_ids = await self.get_descendant_group_ids(deleted_group["id"])
+        if not group_ids:
+            return False
+
+        placeholders = ",".join("?" for _ in group_ids)
+        now = _now_ms()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                f"SELECT 1 FROM member_groups WHERE member_id=? AND group_id IN ({placeholders}) LIMIT 1",
+                (member_id, *group_ids),
+            )
+            if not await cursor.fetchone():
+                return False
+
+            await db.execute(
+                f"DELETE FROM member_groups WHERE member_id=? AND group_id IN ({placeholders})",
+                (member_id, *group_ids),
+            )
+            await db.execute(
+                """
+                INSERT INTO events(event_type, member_id, created_by, created_at, details_json)
+                VALUES ('member_restored', ?, ?, ?, NULL)
+                """,
+                (member_id, created_by, now),
+            )
+            await db.commit()
+            return True
 
     async def ensure_future_year_groups(self, years_ahead: int = 10) -> list[dict[str, Any]]:
         root = await self.get_group_by_name("Years of birth")
