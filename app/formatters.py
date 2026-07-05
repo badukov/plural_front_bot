@@ -64,10 +64,10 @@ def universal_time_text(ms: int, lang: str = "ru") -> str:
     return f"{utc_text} ({rel} {suffix})"
 
 
-def telegram_time_text(ms: int) -> str:
+def telegram_time_text(ms: int, fmt: str = "dt") -> str:
     unix_seconds = max(0, int(ms // 1000))
     fallback = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ms / 1000))
-    return f'<tg-time unix="{unix_seconds}">{escape(fallback)}</tg-time>'
+    return f'<tg-time unix="{unix_seconds}" format="{escape(fmt)}">{escape(fallback)}</tg-time>'
 
 
 async def format_member_brief(member: dict[str, Any], lang: str = "ru") -> str:

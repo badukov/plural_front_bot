@@ -372,11 +372,13 @@ async def main() -> None:
         _check("front history should store compressed snapshots", len(history_rows) == 1)
         _check("front history should restore snapshot members", history_rows[0]["members"][0]["id"] == member["id"])
         history_text = format_front_history(history_rows)
+        _check("front history should use formatted Telegram time", '<tg-time unix="' in history_text and 'format="dt"' in history_text)
         _check("front history text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(history_text)))
         stats = await temp_repo.get_front_statistics(days=30)
         _check("front statistics should count history rows", stats["changes"] == 1)
         _check("front statistics should include percentage distribution", stats["front_percentages"][0]["percent"] == 100.0)
         stats_text = format_front_statistics(stats)
+        _check("front statistics should use formatted Telegram time", '<tg-time unix="' in stats_text and 'format="dt"' in stats_text)
         _check("front statistics text should include percentage", "100.0%" in stats_text)
         _check("front statistics text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(stats_text)))
 
