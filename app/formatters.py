@@ -2,6 +2,7 @@ import json
 import re
 import time
 from typing import Any
+from html import escape
 
 from app.i18n import t
 from app.repository import repo
@@ -61,6 +62,12 @@ def universal_time_text(ms: int, lang: str = "ru") -> str:
         return f"{utc_text} ({rel})"
     suffix = {"ru": "назад", "en": "ago", "it": "fa"}.get(lang, "назад")
     return f"{utc_text} ({rel} {suffix})"
+
+
+def telegram_time_text(ms: int) -> str:
+    unix_seconds = max(0, int(ms // 1000))
+    fallback = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ms / 1000))
+    return f'<tg-time unix="{unix_seconds}">{escape(fallback)}</tg-time>'
 
 
 async def format_member_brief(member: dict[str, Any], lang: str = "ru") -> str:
@@ -158,9 +165,9 @@ async def format_front_info(front_members: list[dict[str, Any]], lang: str = "ru
 
 def format_front_history(rows: list[dict[str, Any]], lang: str = "ru") -> str:
     if not rows:
-        return t("history_empty", lang)
+        return escape(t("history_empty", lang))
 
-    lines = [t("history_title", lang)]
+    lines = [escape(t("history_title", lang))]
     for row in rows:
         members = row.get("members") or []
         names = [
@@ -170,32 +177,32 @@ def format_front_history(rows: list[dict[str, Any]], lang: str = "ru") -> str:
         ]
         status = t("front_blur", lang) if not names else t("front_status", lang, names=", ".join(names))
         lines.append(
-            f"{universal_time_text(int(row['created_at']), lang)}\n"
-            f"{_event_label(str(row.get('event_type') or ''), lang)}: {status}"
+            f"{telegram_time_text(int(row['created_at']))}\n"
+            f"{escape(_event_label(str(row.get('event_type') or ''), lang))}: {escape(status)}"
         )
     return "\n\n".join(lines)
 
 
 def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
-    lines = [t("stats_title", lang, days=stats["days"])]
-    lines.append(t("stats_changes", lang, count=stats["changes"]))
-    lines.append(t("stats_unique", lang, count=stats["unique_count"]))
-    lines.append(t("stats_blur", lang, count=stats["blur_count"]))
+    lines = [escape(t("stats_title", lang, days=stats["days"]))]
+    lines.append(escape(t("stats_changes", lang, count=stats["changes"])))
+    lines.append(escape(t("stats_unique", lang, count=stats["unique_count"])))
+    lines.append(escape(t("stats_blur", lang, count=stats["blur_count"])))
 
     top_members = stats.get("top_members") or []
     if top_members:
-        top_lines = [f"- {name}: {count}" for name, count in top_members]
-        lines.append(t("stats_top", lang) + "\n" + "\n".join(top_lines))
+        top_lines = [f"- {escape(str(name))}: {count}" for name, count in top_members]
+        lines.append(escape(t("stats_top", lang)) + "\n" + "\n".join(top_lines))
     else:
-        lines.append(t("stats_top", lang) + "\n-")
+        lines.append(escape(t("stats_top", lang)) + "\n-")
 
     busiest_day = stats.get("busiest_day")
     if busiest_day:
-        lines.append(t("stats_busiest_day", lang, day=busiest_day[0], count=busiest_day[1]))
+        lines.append(escape(t("stats_busiest_day", lang, day=busiest_day[0], count=busiest_day[1])))
 
     last_change_at = int(stats.get("last_change_at") or 0)
     if last_change_at:
-        lines.append(t("stats_last_change", lang, time=universal_time_text(last_change_at, lang)))
+        lines.append(escape(t("stats_last_change", lang, time="{time}")).replace("{time}", telegram_time_text(last_change_at)))
     return "\n\n".join(lines)
 
 

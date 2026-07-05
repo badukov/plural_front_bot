@@ -27,7 +27,7 @@ def main_keyboard(is_admin: bool, lang: str = "ru") -> ReplyKeyboardMarkup:
         keyboard = [
             [KeyboardButton(text=button_text("front", lang)), KeyboardButton(text=button_text("remove_front", lang))],
             [KeyboardButton(text=button_text("blur", lang)), KeyboardButton(text=button_text("info", lang))],
-            [KeyboardButton(text=button_text("history", lang)), KeyboardButton(text=button_text("statistics", lang))],
+            [KeyboardButton(text=button_text("history", lang))],
             [KeyboardButton(text=button_text("directory", lang)), KeyboardButton(text=button_text("notifications", lang))],
             [KeyboardButton(text=button_text("add_member", lang))],
         ]
@@ -41,6 +41,22 @@ def main_keyboard(is_admin: bool, lang: str = "ru") -> ReplyKeyboardMarkup:
         keyboard=keyboard,
         resize_keyboard=True,
         input_field_placeholder=t("input_placeholder", lang),
+    )
+
+
+def history_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=button_text("statistics", lang), callback_data="hist:stats")],
+        ]
+    )
+
+
+def statistics_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=button_text("history", lang), callback_data="hist:history")],
+        ]
     )
 
 
