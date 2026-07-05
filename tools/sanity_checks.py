@@ -177,7 +177,23 @@ async def main() -> None:
     buttons = member_button_items(matches)
     _assert_callback_data_is_safe(buttons)
     _assert_markup_callback_data_is_safe(directory_home_keyboard())
-    _assert_markup_callback_data_is_safe(directory_member_keyboard("member-id", is_admin=True))
+    admin_member_markup = directory_member_keyboard("member-id", is_admin=True)
+    user_member_markup = directory_member_keyboard("member-id", is_admin=False)
+    _assert_markup_callback_data_is_safe(admin_member_markup)
+    _assert_markup_callback_data_is_safe(user_member_markup)
+    admin_callbacks = [
+        button.callback_data
+        for row in admin_member_markup.inline_keyboard
+        for button in row
+    ]
+    user_callbacks = [
+        button.callback_data
+        for row in user_member_markup.inline_keyboard
+        for button in row
+    ]
+    _check("admin directory card should expose front actions", "dir:addfront:member-id" in admin_callbacks)
+    _check("user directory card should not expose add-front action", "dir:addfront:member-id" not in user_callbacks)
+    _check("user directory card should not expose replace-front action", "dir:replacefront:member-id" not in user_callbacks)
 
     root_groups = await repo.list_child_groups(parent_id=None, limit=8)
     root_total = await repo.count_child_groups(parent_id=None)

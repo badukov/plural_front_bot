@@ -72,9 +72,9 @@ TEXTS = {
         "it": "Sei admin. Sono disponibili gestione del fronte, elenco e gestione membri.\nMembri nel database: {count}.",
     },
     "user_start": {
-        "ru": "Вам доступны информация о фронте, история и оповещения.\nВ базе личностей: {count}.",
-        "en": "You can use front info, history, and notifications.\nMembers in database: {count}.",
-        "it": "Puoi usare info fronte, cronologia e notifiche.\nMembri nel database: {count}.",
+        "ru": "Вам доступны информация о фронте, справочник, история и оповещения.\nВ базе личностей: {count}.",
+        "en": "You can use front info, directory, history, and notifications.\nMembers in database: {count}.",
+        "it": "Puoi usare info fronte, elenco, cronologia e notifiche.\nMembri nel database: {count}.",
     },
     "buttons_updated": {"ru": "Кнопки обновлены.", "en": "Buttons updated.", "it": "Pulsanti aggiornati."},
     "admin_only": {

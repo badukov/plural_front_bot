@@ -34,7 +34,7 @@ def main_keyboard(is_admin: bool, lang: str = "ru") -> ReplyKeyboardMarkup:
     else:
         keyboard = [
             [KeyboardButton(text=button_text("info", lang)), KeyboardButton(text=button_text("notifications", lang))],
-            [KeyboardButton(text=button_text("history", lang))],
+            [KeyboardButton(text=button_text("history", lang)), KeyboardButton(text=button_text("directory", lang))],
         ]
 
     return ReplyKeyboardMarkup(
