@@ -553,7 +553,17 @@ class Repository:
             day = time.strftime("%Y-%m-%d", time.gmtime(int(row["created_at"]) / 1000))
             day_counts[day] = day_counts.get(day, 0) + 1
 
-        top_members = sorted(member_counts.items(), key=lambda item: (-item[1], item[0].casefold()))[:5]
+        sorted_members = sorted(member_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+        total_front_appearances = sum(member_counts.values())
+        front_percentages = [
+            {
+                "name": name,
+                "count": count,
+                "percent": (count / total_front_appearances * 100) if total_front_appearances else 0.0,
+            }
+            for name, count in sorted_members
+        ]
+        top_members = sorted_members[:5]
         busiest_day = max(day_counts.items(), key=lambda item: item[1]) if day_counts else None
         return {
             "days": days,
@@ -561,6 +571,8 @@ class Repository:
             "blur_count": blur_count,
             "unique_count": len(unique_names),
             "top_members": top_members,
+            "front_percentages": front_percentages,
+            "total_front_appearances": total_front_appearances,
             "busiest_day": busiest_day,
             "last_change_at": last_change_at,
         }

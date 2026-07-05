@@ -141,6 +141,11 @@ TEXTS = {
     "stats_unique": {"ru": "Уникальных фронтеров: {count}", "en": "Unique fronters: {count}", "it": "Fronter unici: {count}"},
     "stats_blur": {"ru": "Блюров: {count}", "en": "Blur events: {count}", "it": "Eventi blur: {count}"},
     "stats_top": {"ru": "Чаще всего появлялись:", "en": "Most frequent:", "it": "Piu frequenti:"},
+    "stats_distribution": {
+        "ru": "Доля фронта:",
+        "en": "Front share:",
+        "it": "Quota fronte:",
+    },
     "stats_busiest_day": {"ru": "Самый активный день: {day} ({count})", "en": "Busiest day: {day} ({count})", "it": "Giorno piu attivo: {day} ({count})"},
     "stats_last_change": {"ru": "Последнее изменение: {time}", "en": "Last change: {time}", "it": "Ultimo cambio: {time}"},
     "directory_home": {

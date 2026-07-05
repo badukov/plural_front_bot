@@ -196,6 +196,18 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
     else:
         lines.append(escape(t("stats_top", lang)) + "\n-")
 
+    front_percentages = stats.get("front_percentages") or []
+    if front_percentages:
+        percent_lines = []
+        for item in front_percentages[:15]:
+            name = escape(str(item.get("name") or ""))
+            count = int(item.get("count") or 0)
+            percent = float(item.get("percent") or 0)
+            percent_lines.append(f"- {name}: {percent:.1f}% ({count})")
+        lines.append(escape(t("stats_distribution", lang)) + "\n" + "\n".join(percent_lines))
+    else:
+        lines.append(escape(t("stats_distribution", lang)) + "\n-")
+
     busiest_day = stats.get("busiest_day")
     if busiest_day:
         lines.append(escape(t("stats_busiest_day", lang, day=busiest_day[0], count=busiest_day[1])))
