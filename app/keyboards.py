@@ -9,6 +9,7 @@ from aiogram.types import (
 )
 
 from app.i18n import button_text, t
+from app.repository import member_reference
 
 
 BTN_FRONT = "Фронт"
@@ -107,7 +108,7 @@ def members_choice_keyboard(action: str, members: list[tuple[str, str]], lang: s
 
 def search_results_keyboard(members: list[dict[str, Any]], lang: str = "ru") -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"{t('details_prefix', lang)}: {name}", callback_data=f"dir:m:{member_id}")]
+        [InlineKeyboardButton(text=f"{t('details_prefix', lang)}: {name}", callback_data=f"dir:m:{member_reference(member_id)}")]
         for member_id, name in member_button_items(members, lang)
     ]
     rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])
@@ -118,6 +119,7 @@ def add_member_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t("import_florality", lang), callback_data="add:import_florality")],
+            [InlineKeyboardButton(text=t("download_florality_avatars", lang), callback_data="add:avatars_florality")],
             [InlineKeyboardButton(text=t("export_json", lang), callback_data="add:export")],
             [InlineKeyboardButton(text=t("cancel", lang), callback_data="add:cancel")],
         ]
@@ -171,14 +173,15 @@ def add_category_selected_keyboard(group_id: str, selected: bool, lang: str = "r
     )
 
 
-def directory_home_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=t("search_by_name", lang), callback_data="dir:search")],
-            [InlineKeyboardButton(text=t("categories", lang), callback_data="dir:cats:0")],
-            [InlineKeyboardButton(text=t("all_members", lang), callback_data="dir:all:0")],
-        ]
-    )
+def directory_home_keyboard(lang: str = "ru", is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=t("search_by_name", lang), callback_data="dir:search")],
+        [InlineKeyboardButton(text=t("categories", lang), callback_data="dir:cats:0")],
+        [InlineKeyboardButton(text=t("all_members", lang), callback_data="dir:all:0")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text=button_text("add_member", lang), callback_data="add:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def directory_categories_keyboard(
@@ -263,7 +266,7 @@ def directory_members_keyboard(
     lang: str = "ru",
 ) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"dir:m:{member_id}")]
+        [InlineKeyboardButton(text=name, callback_data=f"dir:m:{member_reference(member_id)}")]
         for member_id, name in member_button_items(members, lang)
     ]
 
@@ -282,11 +285,12 @@ def directory_members_keyboard(
 
 def directory_member_keyboard(member_id: str, is_admin: bool, lang: str = "ru") -> InlineKeyboardMarkup:
     rows = []
+    reference = member_reference(member_id)
     if is_admin:
         rows.extend(
             [
-                [InlineKeyboardButton(text=t("add_to_front", lang), callback_data=f"dir:addfront:{member_id}")],
-                [InlineKeyboardButton(text=t("replace_front", lang), callback_data=f"dir:replacefront:{member_id}")],
+                [InlineKeyboardButton(text=t("add_to_front", lang), callback_data=f"dir:addfront:{reference}")],
+                [InlineKeyboardButton(text=t("replace_front", lang), callback_data=f"dir:replacefront:{reference}")],
             ]
         )
     rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])

@@ -30,6 +30,9 @@ async def main() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
+    if not settings.admin_ids:
+        logging.warning("ADMIN_IDS is empty: member management and front controls will be unavailable")
+
     await init_db(settings.database_path)
 
     if settings.auto_import_on_start:
