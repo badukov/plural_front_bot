@@ -345,6 +345,13 @@ class Repository:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_subscribed_admin_users(self) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT * FROM users WHERE subscribed=1 AND is_admin=1 ORDER BY created_at"
+            )
+            return [dict(row) for row in await cursor.fetchall()]
+
     async def count_members(self) -> int:
         async with self._connect() as db:
             cursor = await db.execute("SELECT COUNT(*) AS c FROM members")

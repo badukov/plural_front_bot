@@ -145,6 +145,11 @@ TEXTS = {
         "en": "Front changed in Florality",
         "it": "Fronte cambiato in Florality",
     },
+    "admin_front_check_reminder": {
+        "ru": "Напоминание: проверьте, актуален ли текущий фронт.\n\nСейчас: {status}",
+        "en": "Reminder: please check whether the current front is still accurate.\n\nCurrent status: {status}",
+        "it": "Promemoria: controlla se il fronte attuale è ancora corretto.\n\nStato attuale: {status}",
+    },
     "history_title": {"ru": "История фронта:", "en": "Front history:", "it": "Cronologia fronte:"},
     "history_empty": {
         "ru": "История пока пустая. Новые изменения фронта начнут сохраняться с этого обновления.",
@@ -194,9 +199,14 @@ TEXTS = {
         "it": "Controllo Florality avviato...",
     },
     "florality_avatar_sync_started": {
-        "ru": "Загружаю небольшую пачку аватаров из Florality. Это может занять около минуты...",
-        "en": "Downloading a small batch of Florality avatars. This may take about a minute...",
-        "it": "Scarico un piccolo gruppo di avatar da Florality. Potrebbe richiedere circa un minuto...",
+        "ru": "Начинаю последовательную загрузку аватаров из Florality. Полный проход может занять несколько минут...",
+        "en": "Starting sequential Florality avatar download. A full pass may take several minutes...",
+        "it": "Avvio il download sequenziale degli avatar Florality. Un passaggio completo può richiedere alcuni minuti...",
+    },
+    "florality_avatar_sync_progress": {
+        "ru": "Загружаю аватары из Florality...\n\nЗагружено: {downloaded}/{total}\nОшибок: {failed}\nОсталось попыток: {remaining}\n\nПродолжаю автоматически, API опрашивается последовательно.",
+        "en": "Downloading Florality avatars...\n\nDownloaded: {downloaded}/{total}\nFailures: {failed}\nAttempts remaining: {remaining}\n\nContinuing automatically with sequential API requests.",
+        "it": "Scarico gli avatar Florality...\n\nScaricati: {downloaded}/{total}\nErrori: {failed}\nTentativi rimanenti: {remaining}\n\nContinuo automaticamente con richieste API sequenziali.",
     },
     "florality_avatar_sync_done": {
         "ru": "Загрузка аватаров завершена.\n\nЗагружены:\n{downloaded}\n\nОшибки:\n{failed}\n\nУже были: {existing}\nБез аватара во Florality: {no_avatar}\nНеоднозначные совпадения: {ambiguous}\nНет локальной личности: {missing_local}\nОсталось загрузить: {remaining}",
@@ -204,9 +214,14 @@ TEXTS = {
         "it": "Download avatar completato.\n\nScaricati:\n{downloaded}\n\nErrori:\n{failed}\n\nGia presenti: {existing}\nSenza avatar in Florality: {no_avatar}\nCorrispondenze ambigue: {ambiguous}\nMembro locale assente: {missing_local}\nRimanenti: {remaining}",
     },
     "florality_category_sync_started": {
-        "ru": "Проверяю небольшую пачку категорий Florality. Это может занять около минуты...",
-        "en": "Checking a small batch of Florality categories. This may take about a minute...",
-        "it": "Controllo un piccolo gruppo di categorie Florality. Potrebbe richiedere circa un minuto...",
+        "ru": "Начинаю последовательную загрузку категорий Florality. Полный проход может занять несколько минут...",
+        "en": "Starting sequential Florality category download. A full pass may take several minutes...",
+        "it": "Avvio il download sequenziale delle categorie Florality. Un passaggio completo può richiedere alcuni minuti...",
+    },
+    "florality_category_sync_progress": {
+        "ru": "Загружаю категории Florality...\n\nОбработано: {processed}/{matched}\nДобавлено связей: {added}\n\nПродолжаю автоматически, API опрашивается последовательно.",
+        "en": "Downloading Florality categories...\n\nProcessed: {processed}/{matched}\nLinks added: {added}\n\nContinuing automatically with sequential API requests.",
+        "it": "Scarico le categorie Florality...\n\nElaborati: {processed}/{matched}\nCollegamenti aggiunti: {added}\n\nContinuo automaticamente con richieste API sequenziali.",
     },
     "florality_category_sync_done": {
         "ru": "Загрузка категорий завершена.\n\nОбработано групп: {processed}\nСопоставлено групп всего: {matched}\nБез локального соответствия: {unmatched}\nДобавлено связей: {added}\n\nОбновлены личности:\n{affected}\n\nОшибки групп:\n{failed}\n\nОсталось групп: {remaining}\nБекап: {backup}",

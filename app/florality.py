@@ -59,6 +59,7 @@ class FloralityImportResult:
 class FloralityAvatarSyncResult:
     downloaded_names: tuple[str, ...] = field(default_factory=tuple)
     failed_names: tuple[str, ...] = field(default_factory=tuple)
+    failed_remote_ids: tuple[str, ...] = field(default_factory=tuple)
     skipped_existing: int = 0
     skipped_ambiguous: int = 0
     skipped_missing_local: int = 0
@@ -294,11 +295,15 @@ class FloralityClient:
         path = Path(value)
         return path.is_file() and path.suffix.casefold() in {".jpg", ".jpeg"}
 
-    async def sync_member_avatars_from_florality(self) -> FloralityAvatarSyncResult:
+    async def sync_member_avatars_from_florality(
+        self,
+        excluded_remote_ids: set[str] | None = None,
+    ) -> FloralityAvatarSyncResult:
         if not self.enabled:
             return FloralityAvatarSyncResult()
 
         async with self._avatar_sync_lock:
+            excluded_remote_ids = excluded_remote_ids or set()
             remote_members = await self.list_members()
             if remote_members is None:
                 return FloralityAvatarSyncResult(failed_names=("Florality API",))
@@ -315,6 +320,8 @@ class FloralityClient:
                     continue
                 if not str(remote_member.get("avatarUrl") or "").strip():
                     no_avatar += 1
+                    continue
+                if remote_id in excluded_remote_ids:
                     continue
 
                 local_id = await repo.get_local_id_for_external_id(PROVIDER, MEMBER_ENTITY, remote_id)
@@ -345,6 +352,7 @@ class FloralityClient:
             batch_size = settings.florality_avatar_batch_size
             downloaded_names: list[str] = []
             failed_names: list[str] = []
+            failed_remote_ids: list[str] = []
             batch = candidates[:batch_size]
             for index, (remote_member, local_id, name) in enumerate(batch):
                 remote_id = _remote_member_id(remote_member)
@@ -353,12 +361,15 @@ class FloralityClient:
                     downloaded_names.append(name)
                 else:
                     failed_names.append(name)
+                    if remote_id:
+                        failed_remote_ids.append(remote_id)
                 if index + 1 < len(batch):
                     await asyncio.sleep(settings.florality_avatar_delay_seconds)
 
             return FloralityAvatarSyncResult(
                 downloaded_names=tuple(downloaded_names),
                 failed_names=tuple(failed_names),
+                failed_remote_ids=tuple(failed_remote_ids),
                 skipped_existing=skipped_existing,
                 skipped_ambiguous=skipped_ambiguous,
                 skipped_missing_local=skipped_missing_local,
@@ -854,8 +865,10 @@ async def import_florality_members() -> FloralityImportResult:
     return await florality.import_members_from_florality()
 
 
-async def sync_florality_member_avatars() -> FloralityAvatarSyncResult:
-    return await florality.sync_member_avatars_from_florality()
+async def sync_florality_member_avatars(
+    excluded_remote_ids: set[str] | None = None,
+) -> FloralityAvatarSyncResult:
+    return await florality.sync_member_avatars_from_florality(excluded_remote_ids)
 
 
 async def sync_florality_imported_member_categories(offset: int = 0) -> FloralityCategorySyncResult:
