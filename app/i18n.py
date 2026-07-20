@@ -199,9 +199,14 @@ TEXTS = {
         "it": "Controllo Florality avviato...",
     },
     "florality_avatar_sync_started": {
-        "ru": "Загружаю небольшую пачку аватаров из Florality. Это может занять около минуты...",
-        "en": "Downloading a small batch of Florality avatars. This may take about a minute...",
-        "it": "Scarico un piccolo gruppo di avatar da Florality. Potrebbe richiedere circa un minuto...",
+        "ru": "Начинаю последовательную загрузку аватаров из Florality. Полный проход может занять несколько минут...",
+        "en": "Starting sequential Florality avatar download. A full pass may take several minutes...",
+        "it": "Avvio il download sequenziale degli avatar Florality. Un passaggio completo può richiedere alcuni minuti...",
+    },
+    "florality_avatar_sync_progress": {
+        "ru": "Загружаю аватары из Florality...\n\nЗагружено: {downloaded}/{total}\nОшибок: {failed}\nОсталось попыток: {remaining}\n\nПродолжаю автоматически, API опрашивается последовательно.",
+        "en": "Downloading Florality avatars...\n\nDownloaded: {downloaded}/{total}\nFailures: {failed}\nAttempts remaining: {remaining}\n\nContinuing automatically with sequential API requests.",
+        "it": "Scarico gli avatar Florality...\n\nScaricati: {downloaded}/{total}\nErrori: {failed}\nTentativi rimanenti: {remaining}\n\nContinuo automaticamente con richieste API sequenziali.",
     },
     "florality_avatar_sync_done": {
         "ru": "Загрузка аватаров завершена.\n\nЗагружены:\n{downloaded}\n\nОшибки:\n{failed}\n\nУже были: {existing}\nБез аватара во Florality: {no_avatar}\nНеоднозначные совпадения: {ambiguous}\nНет локальной личности: {missing_local}\nОсталось загрузить: {remaining}",

@@ -252,17 +252,56 @@ async def download_avatars_from_florality(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         await callback.message.edit_text(t("florality_avatar_sync_started", lang))
-    result = await sync_florality_member_avatars()
+
+    downloaded_names: list[str] = []
+    failed_names: set[str] = set()
+    excluded_remote_ids: set[str] = set()
+    total_to_download: int | None = None
+    existing = 0
+    no_avatar = 0
+    ambiguous = 0
+    missing_local = 0
+    remaining = 0
+
+    while True:
+        result = await sync_florality_member_avatars(excluded_remote_ids)
+        if total_to_download is None:
+            total_to_download = len(result.downloaded_names) + result.remaining
+            existing = result.skipped_existing
+            no_avatar = result.no_avatar
+            ambiguous = result.skipped_ambiguous
+            missing_local = result.skipped_missing_local
+
+        downloaded_names.extend(result.downloaded_names)
+        failed_names.difference_update(result.downloaded_names)
+        failed_names.update(result.failed_names)
+        excluded_remote_ids.update(result.failed_remote_ids)
+        remaining = result.remaining
+
+        if not remaining:
+            break
+        if callback.message:
+            await callback.message.edit_text(
+                t(
+                    "florality_avatar_sync_progress",
+                    lang,
+                    downloaded=len(downloaded_names),
+                    total=total_to_download,
+                    failed=len(failed_names),
+                    remaining=remaining,
+                )
+            )
+
     text = t(
         "florality_avatar_sync_done",
         lang,
-        downloaded=_names_block(result.downloaded_names),
-        failed=_names_block(result.failed_names),
-        existing=result.skipped_existing,
-        no_avatar=result.no_avatar,
-        ambiguous=result.skipped_ambiguous,
-        missing_local=result.skipped_missing_local,
-        remaining=result.remaining,
+        downloaded=_names_block(tuple(downloaded_names)),
+        failed=_names_block(tuple(sorted(failed_names))),
+        existing=existing,
+        no_avatar=no_avatar,
+        ambiguous=ambiguous,
+        missing_local=missing_local,
+        remaining=remaining + len(failed_names),
     )
     if callback.message:
         await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))

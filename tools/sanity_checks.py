@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.config import settings
 from app.database import init_db
+import app.florality as florality_module
 from app.florality import FloralityClient
 from app.formatters import (
     current_status_text,
@@ -463,6 +464,43 @@ async def main() -> None:
         )
         _check("Florality member import should create local member", import_action == "created")
         _check("Florality imported member should use local id prefix", imported_member["id"].startswith("florality_"))
+
+        class FakeAvatarClient(FloralityClient):
+            @property
+            def enabled(self) -> bool:
+                return True
+
+            async def list_members(self) -> list[dict[str, object]]:
+                return [
+                    {
+                        "_id": "remote-imported-member",
+                        "name": "Florality Imported Member",
+                        "avatarUrl": "/test-avatar.webp",
+                    }
+                ]
+
+            async def _download_member_avatar(self, remote_member, remote_id: str) -> str:
+                return ""
+
+        original_florality_repo = florality_module.repo
+        florality_module.repo = temp_repo
+        try:
+            fake_avatar_client = FakeAvatarClient()
+            failed_avatar_batch = await fake_avatar_client.sync_member_avatars_from_florality()
+            skipped_failed_batch = await fake_avatar_client.sync_member_avatars_from_florality(
+                set(failed_avatar_batch.failed_remote_ids)
+            )
+        finally:
+            florality_module.repo = original_florality_repo
+        _check(
+            "failed avatar batches should expose remote ids for the current-run skip list",
+            failed_avatar_batch.failed_remote_ids == ("remote-imported-member",),
+        )
+        _check(
+            "failed avatar ids should be skippable so later batches can continue",
+            skipped_failed_batch.remaining == 0 and not skipped_failed_batch.failed_names,
+        )
+
         imported_reference = member_reference(imported_member["id"])
         resolved_imported_member = await temp_repo.get_member_by_reference(imported_reference)
         _check(
