@@ -644,27 +644,30 @@ class Repository:
             )
             return [dict(row) for row in await cursor.fetchall()]
 
-    async def find_unique_member_by_names(self, names: list[str]) -> dict[str, Any] | None:
+    async def find_members_by_names(self, names: list[str]) -> list[dict[str, Any]]:
         normalized_names = {_normalize_search_text(name) for name in names if name and _normalize_search_text(name)}
         if not normalized_names:
-            return None
+            return []
 
         deleted_ids = await self.get_deleted_member_ids()
         async with self._connect() as db:
             cursor = await db.execute(
                 """
-                SELECT id, name, pronouns, is_private, is_archived
+                SELECT *
                 FROM members
                 ORDER BY name COLLATE NOCASE, id
                 """
             )
             rows = [dict(row) for row in await cursor.fetchall()]
 
-        matches = [
+        return [
             row
             for row in rows
             if row["id"] not in deleted_ids and _normalize_search_text(row.get("name") or "") in normalized_names
         ]
+
+    async def find_unique_member_by_names(self, names: list[str]) -> dict[str, Any] | None:
+        matches = await self.find_members_by_names(names)
         unique_ids = {row["id"] for row in matches}
         if len(unique_ids) == 1:
             return matches[0]
@@ -679,12 +682,15 @@ class Repository:
         existing = await self.get_member_by_id(mapped_local_id) if mapped_local_id else None
 
         if not existing:
-            existing = await self.find_unique_member_by_names(
+            matches = await self.find_members_by_names(
                 [
                     str(remote_member.get("name") or "").strip(),
                     str(remote_member.get("displayName") or "").strip(),
                 ]
             )
+            if len({member["id"] for member in matches}) > 1:
+                return None, "ambiguous"
+            existing = matches[0] if matches else None
 
         if not existing:
             return None, "missing"
@@ -698,11 +704,9 @@ class Repository:
         if name:
             comparisons.append(("name", name))
         if "pronouns" in remote_member:
-            comparisons.append(("pronouns", str(remote_member.get("pronouns") or "")))
+            comparisons.append(("pronouns", str(remote_member.get("pronouns") or "").strip()))
         if "about" in remote_member:
-            comparisons.append(("description", str(remote_member.get("about") or "")))
-        if "avatar" in remote_member:
-            comparisons.append(("avatar_url", str(remote_member.get("avatar") or "")))
+            comparisons.append(("description", str(remote_member.get("about") or "").strip()))
         if "deletedAt" in remote_member:
             comparisons.append(("is_archived", 1 if remote_member.get("deletedAt") else 0))
             if remote_member.get("deletedAt"):
@@ -710,9 +714,8 @@ class Repository:
 
         comparable = {
             "name": existing.get("name") or "",
-            "pronouns": existing.get("pronouns") or "",
-            "description": existing.get("description") or "",
-            "avatar_url": existing.get("avatar_url") or "",
+            "pronouns": str(existing.get("pronouns") or "").strip(),
+            "description": str(existing.get("description") or "").strip(),
             "is_archived": 1 if existing.get("is_archived") else 0,
             "archived_reason": existing.get("archived_reason") or "",
         }
@@ -727,12 +730,15 @@ class Repository:
         existing = await self.get_member_by_id(mapped_local_id) if mapped_local_id else None
 
         if not existing:
-            existing = await self.find_unique_member_by_names(
+            matches = await self.find_members_by_names(
                 [
                     str(remote_member.get("name") or "").strip(),
                     str(remote_member.get("displayName") or "").strip(),
                 ]
             )
+            if len({member["id"] for member in matches}) > 1:
+                raise ValueError("Florality member name matches multiple local members")
+            existing = matches[0] if matches else None
 
         cleaned_remote_id = EXTERNAL_ID_CLEANUP_RE.sub("_", remote_id).strip("_") or "member"
         remote_digest = hashlib.sha1(remote_id.encode("utf-8")).hexdigest()[:10]
@@ -763,7 +769,11 @@ class Repository:
                 "name": name,
                 "pronouns": remote_member.get("pronouns") or "",
                 "desc": remote_member.get("about") or raw.get("desc") or "",
-                "avatarUrl": remote_member.get("avatar") or raw.get("avatarUrl") or "",
+                "avatarUrl": (
+                    remote_member.get("_local_avatar_path")
+                    or raw.get("avatarUrl")
+                    or ""
+                ),
                 "archived": bool(remote_member.get("deletedAt")) or bool(raw.get("archived")),
                 "archivedReason": (
                     "Deleted in Florality"
@@ -773,6 +783,8 @@ class Repository:
                 "florality": {
                     "_id": remote_id,
                     "displayName": remote_member.get("displayName") or "",
+                    "avatar": remote_member.get("avatar") or "",
+                    "avatarUrl": remote_member.get("avatarUrl") or "",
                     "createdAt": remote_member.get("createdAt") or "",
                     "updatedAt": remote_member.get("updatedAt") or "",
                     "deletedAt": remote_member.get("deletedAt") or "",
@@ -783,7 +795,11 @@ class Repository:
             "name": name,
             "pronouns": str(remote_member.get("pronouns") or ""),
             "description": str(remote_member.get("about") or ""),
-            "avatar_url": str(remote_member.get("avatar") or ""),
+            "avatar_url": str(
+                remote_member.get("_local_avatar_path")
+                or (existing.get("avatar_url") if existing else "")
+                or ""
+            ),
             "is_archived": 1 if (remote_member.get("deletedAt") or (existing and existing.get("is_archived"))) else 0,
             "archived_reason": (
                 "Deleted in Florality"

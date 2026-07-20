@@ -1,9 +1,11 @@
 import asyncio
+import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from aiogram import Bot
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class FloralityImportResult:
-    imported_front_names: tuple[str, ...] = field(default_factory=tuple)
+    imported_names: tuple[str, ...] = field(default_factory=tuple)
     changed_names: tuple[str, ...] = field(default_factory=tuple)
     missing_local_names: tuple[str, ...] = field(default_factory=tuple)
     missing_remote_names: tuple[str, ...] = field(default_factory=tuple)
@@ -33,8 +35,8 @@ class FloralityImportResult:
     backup_path: str = ""
 
     @property
-    def imported_front(self) -> int:
-        return len(self.imported_front_names)
+    def imported(self) -> int:
+        return len(self.imported_names)
 
     @property
     def changed(self) -> int:
@@ -176,6 +178,53 @@ class FloralityClient:
             return [item for item in data if isinstance(item, dict)]
         return None
 
+    async def _download_member_avatar(self, remote_member: dict[str, Any], remote_id: str) -> str:
+        avatar_path = str(remote_member.get("avatarUrl") or "").strip()
+        if not avatar_path:
+            return ""
+
+        try:
+            return await asyncio.to_thread(self._download_member_avatar_sync, avatar_path, remote_id)
+        except (HTTPError, URLError, TimeoutError, OSError) as error:
+            logger.warning("Florality avatar download failed for remote member %s: %s", remote_id, error)
+            return ""
+
+    def _download_member_avatar_sync(self, avatar_path: str, remote_id: str) -> str:
+        parsed_base = urlsplit(self.base_url)
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}/"
+        avatar_url = urljoin(origin, avatar_path)
+        request = Request(
+            avatar_url,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "image/*",
+                "User-Agent": "plural-front-bot/1.0",
+            },
+            method="GET",
+        )
+        with urlopen(request, timeout=20) as response:
+            content_type = response.headers.get_content_type()
+            if not content_type.startswith("image/"):
+                raise OSError(f"unexpected avatar content type: {content_type}")
+            data = response.read(10 * 1024 * 1024 + 1)
+        if not data or len(data) > 10 * 1024 * 1024:
+            raise OSError("avatar is empty or exceeds 10 MiB")
+
+        extension = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+        }.get(content_type, ".img")
+        digest = hashlib.sha256(remote_id.encode("utf-8")).hexdigest()[:24]
+        avatar_dir = settings.database_path.parent / "avatars" / PROVIDER
+        avatar_dir.mkdir(parents=True, exist_ok=True)
+        avatar_file = avatar_dir / f"{digest}{extension}"
+        temporary_file = avatar_file.with_suffix(f"{avatar_file.suffix}.tmp")
+        temporary_file.write_bytes(data)
+        temporary_file.replace(avatar_file)
+        return str(avatar_file)
+
     async def import_member_from_florality(
         self,
         remote_member: dict[str, Any],
@@ -189,7 +238,11 @@ class FloralityClient:
             if create_backup:
                 backup_path = await create_database_backup("florality_front_import")
                 logger.info("Database backup created before Florality front import: %s", backup_path.name)
-            member, _action = await repo.upsert_florality_member(remote_member, remote_id)
+            import_payload = dict(remote_member)
+            local_avatar_path = await self._download_member_avatar(remote_member, remote_id)
+            if local_avatar_path:
+                import_payload["_local_avatar_path"] = local_avatar_path
+            member, _action = await repo.upsert_florality_member(import_payload, remote_id)
             return member
         except ValueError:
             logger.warning("Florality member import skipped: required fields are missing")
@@ -206,20 +259,22 @@ class FloralityClient:
         if remote_members is None:
             return FloralityImportResult(skipped=1)
 
-        remote_front_members = await self.get_front()
-        remote_front_ids = {
-            remote_id
-            for member in remote_front_members or []
-            if (remote_id := _remote_member_id(member))
-        }
         backup_path = ""
-        imported_front_names: list[str] = []
+        imported_names: list[str] = []
         changed_names: list[str] = []
         missing_local_names: list[str] = []
         missing_remote_names: list[str] = []
         unchanged = 0
         skipped = 0
         active_remote_ids: set[str] = set()
+
+        async def ensure_backup() -> None:
+            nonlocal backup_path
+            if backup_path:
+                return
+            backup = await create_database_backup("florality_import")
+            backup_path = str(backup)
+            logger.info("Database backup created before Florality import: %s", backup.name)
 
         for remote_member in remote_members:
             remote_id = _remote_member_id(remote_member)
@@ -229,23 +284,26 @@ class FloralityClient:
             active_remote_ids.add(remote_id)
 
             name = str(remote_member.get("name") or remote_member.get("displayName") or remote_id).strip()
-            _local_member, action = await repo.compare_florality_member(remote_member, remote_id)
+            local_member, action = await repo.compare_florality_member(remote_member, remote_id)
+            if local_member:
+                mapped_local_id = await repo.get_local_id_for_external_id(PROVIDER, MEMBER_ENTITY, remote_id)
+                if mapped_local_id != str(local_member["id"]):
+                    await ensure_backup()
+                    await repo.set_external_id(PROVIDER, MEMBER_ENTITY, str(local_member["id"]), remote_id)
             if action == "unchanged":
                 unchanged += 1
             elif action == "changed":
                 changed_names.append(name)
-            elif action == "missing" and remote_id in remote_front_ids:
-                if not backup_path:
-                    backup = await create_database_backup("florality_front_import")
-                    backup_path = str(backup)
-                    logger.info("Database backup created before Florality front import: %s", backup.name)
+            elif action == "missing":
+                await ensure_backup()
                 imported_member = await self.import_member_from_florality(remote_member, create_backup=False)
                 if imported_member:
-                    imported_front_names.append(imported_member["name"])
+                    imported_names.append(imported_member["name"])
                 else:
+                    missing_local_names.append(name)
                     skipped += 1
-            elif action == "missing":
-                continue
+            elif action == "ambiguous":
+                skipped += 1
             else:
                 skipped += 1
 
@@ -262,7 +320,7 @@ class FloralityClient:
             missing_remote_names.append(str(member.get("name") or local_id))
 
         return FloralityImportResult(
-            imported_front_names=tuple(imported_front_names),
+            imported_names=tuple(imported_names),
             changed_names=tuple(changed_names),
             missing_local_names=tuple(missing_local_names),
             missing_remote_names=tuple(missing_remote_names),
