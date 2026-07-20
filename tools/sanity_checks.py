@@ -33,7 +33,7 @@ from app.keyboards import (
     member_button_items,
     members_choice_keyboard,
 )
-from app.repository import RU_TO_EN_KEYBOARD, Repository, _cyrillic_to_latin, repo
+from app.repository import RU_TO_EN_KEYBOARD, Repository, _cyrillic_to_latin, member_reference, repo
 
 
 MAX_CALLBACK_DATA_BYTES = 64
@@ -209,6 +209,10 @@ async def main() -> None:
     _check("admin directory card should expose front actions", "dir:addfront:member-id" in admin_callbacks)
     _check("user directory card should not expose add-front action", "dir:addfront:member-id" not in user_callbacks)
     _check("user directory card should not expose replace-front action", "dir:replacefront:member-id" not in user_callbacks)
+    long_member_id = "florality_" + "x" * 80
+    long_member_markup = directory_member_keyboard(long_member_id, is_admin=True)
+    _assert_markup_callback_data_is_safe(long_member_markup)
+    _check("long member ids should use a short callback reference", member_reference(long_member_id).startswith("~"))
 
     root_groups = await repo.list_child_groups(parent_id=None, limit=8)
     root_total = await repo.count_child_groups(parent_id=None)
@@ -417,6 +421,12 @@ async def main() -> None:
         )
         _check("Florality member import should create local member", import_action == "created")
         _check("Florality imported member should use local id prefix", imported_member["id"].startswith("florality_"))
+        imported_reference = member_reference(imported_member["id"])
+        resolved_imported_member = await temp_repo.get_member_by_reference(imported_reference)
+        _check(
+            "short callback reference should resolve a Florality member",
+            resolved_imported_member is not None and resolved_imported_member["id"] == imported_member["id"],
+        )
 
         imported_member, import_action = await temp_repo.upsert_florality_member(
             {

@@ -310,11 +310,12 @@ async def directory_group_members(callback: CallbackQuery) -> None:
 @router.callback_query(lambda callback: callback.data and callback.data.startswith("dir:m:"))
 async def directory_member_info(callback: CallbackQuery) -> None:
     lang = lang_from_callback(callback)
-    member_id = (callback.data or "")[len("dir:m:") :]
-    member = await repo.get_member_by_id(member_id)
+    reference = (callback.data or "")[len("dir:m:") :]
+    member = await repo.get_member_by_reference(reference)
     if not member:
         await callback.answer(t("member_not_found", lang), show_alert=True)
         return
+    member_id = str(member["id"])
 
     await callback.answer()
     avatar_value = str(member.get("avatar_url") or "").strip()
@@ -346,11 +347,12 @@ async def directory_add_to_front(callback: CallbackQuery) -> None:
         await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
-    member_id = (callback.data or "")[len("dir:addfront:") :]
-    member = await repo.get_member_by_id(member_id)
+    reference = (callback.data or "")[len("dir:addfront:") :]
+    member = await repo.get_member_by_reference(reference)
     if not member:
         await callback.answer(t("member_not_found", lang), show_alert=True)
         return
+    member_id = str(member["id"])
 
     added = await repo.add_to_front(member_id, callback.from_user.id if callback.from_user else None)
     front_members = await repo.get_current_front_members()
@@ -382,11 +384,12 @@ async def directory_replace_front(callback: CallbackQuery) -> None:
         await callback.answer(t("not_enough_rights", lang), show_alert=True)
         return
 
-    member_id = (callback.data or "")[len("dir:replacefront:") :]
-    member = await repo.get_member_by_id(member_id)
+    reference = (callback.data or "")[len("dir:replacefront:") :]
+    member = await repo.get_member_by_reference(reference)
     if not member:
         await callback.answer(t("member_not_found", lang), show_alert=True)
         return
+    member_id = str(member["id"])
 
     changed = await repo.replace_front_members(
         [member_id],

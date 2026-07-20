@@ -20,6 +20,7 @@ MENTION_RE = re.compile(r"<###@([^#<>]+)###>")
 SEARCH_SPLIT_RE = re.compile(r"[^0-9a-zа-яё]+", re.IGNORECASE)
 DELETED_GROUP_NAMES = {"deleted", "trash", "удаленные", "удалённые", "удалено"}
 EXTERNAL_ID_CLEANUP_RE = re.compile(r"[^0-9A-Za-z_-]+")
+MEMBER_REFERENCE_PREFIX = "~"
 
 EN_TO_RU_KEYBOARD_MAP = {
     "q": "й",
@@ -154,6 +155,14 @@ def _compact_search_text(text: str) -> str:
 
 def _json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True)
+
+
+def member_reference(member_id: str) -> str:
+    value = str(member_id)
+    if len(value.encode("utf-8")) <= 40:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    return f"{MEMBER_REFERENCE_PREFIX}{digest}"
 
 
 def _pack_json(obj: Any) -> str:
@@ -581,6 +590,23 @@ class Repository:
         async with self._connect() as db:
             cursor = await db.execute("SELECT * FROM members WHERE id=?", (member_id,))
             return _row_to_dict(await cursor.fetchone())
+
+    async def get_member_by_reference(self, reference: str | None) -> dict[str, Any] | None:
+        if not reference:
+            return None
+        exact = await self.get_member_by_id(reference)
+        if exact or not reference.startswith(MEMBER_REFERENCE_PREFIX):
+            return exact
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT id FROM members ORDER BY id")
+            matching_ids = [
+                str(row["id"])
+                for row in await cursor.fetchall()
+                if member_reference(str(row["id"])) == reference
+            ]
+        if len(matching_ids) != 1:
+            return None
+        return await self.get_member_by_id(matching_ids[0])
 
     async def get_external_id(self, provider: str, entity_type: str, local_id: str) -> str | None:
         async with self._connect() as db:

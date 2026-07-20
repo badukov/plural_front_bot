@@ -9,6 +9,7 @@ from aiogram.types import (
 )
 
 from app.i18n import button_text, t
+from app.repository import member_reference
 
 
 BTN_FRONT = "Фронт"
@@ -107,7 +108,7 @@ def members_choice_keyboard(action: str, members: list[tuple[str, str]], lang: s
 
 def search_results_keyboard(members: list[dict[str, Any]], lang: str = "ru") -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"{t('details_prefix', lang)}: {name}", callback_data=f"dir:m:{member_id}")]
+        [InlineKeyboardButton(text=f"{t('details_prefix', lang)}: {name}", callback_data=f"dir:m:{member_reference(member_id)}")]
         for member_id, name in member_button_items(members, lang)
     ]
     rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])
@@ -265,7 +266,7 @@ def directory_members_keyboard(
     lang: str = "ru",
 ) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=name, callback_data=f"dir:m:{member_id}")]
+        [InlineKeyboardButton(text=name, callback_data=f"dir:m:{member_reference(member_id)}")]
         for member_id, name in member_button_items(members, lang)
     ]
 
@@ -284,11 +285,12 @@ def directory_members_keyboard(
 
 def directory_member_keyboard(member_id: str, is_admin: bool, lang: str = "ru") -> InlineKeyboardMarkup:
     rows = []
+    reference = member_reference(member_id)
     if is_admin:
         rows.extend(
             [
-                [InlineKeyboardButton(text=t("add_to_front", lang), callback_data=f"dir:addfront:{member_id}")],
-                [InlineKeyboardButton(text=t("replace_front", lang), callback_data=f"dir:replacefront:{member_id}")],
+                [InlineKeyboardButton(text=t("add_to_front", lang), callback_data=f"dir:addfront:{reference}")],
+                [InlineKeyboardButton(text=t("replace_front", lang), callback_data=f"dir:replacefront:{reference}")],
             ]
         )
     rows.append([InlineKeyboardButton(text=t("to_directory", lang), callback_data="dir:home")])
