@@ -49,6 +49,8 @@ class Settings:
     florality_pull_front_enabled: bool
     florality_pull_interval_seconds: int
     florality_create_missing_members_enabled: bool
+    florality_avatar_batch_size: int
+    florality_avatar_delay_seconds: float
 
 
 settings = Settings(
@@ -67,6 +69,8 @@ settings = Settings(
     florality_pull_front_enabled=_bool("FLORALITY_PULL_FRONT_ENABLED", True),
     florality_pull_interval_seconds=max(15, int(os.getenv("FLORALITY_PULL_INTERVAL_SECONDS", "60"))),
     florality_create_missing_members_enabled=_bool("FLORALITY_CREATE_MISSING_MEMBERS_ENABLED", False),
+    florality_avatar_batch_size=max(1, int(os.getenv("FLORALITY_AVATAR_BATCH_SIZE", "25"))),
+    florality_avatar_delay_seconds=max(0.2, float(os.getenv("FLORALITY_AVATAR_DELAY_SECONDS", "1"))),
 )
 
 if not settings.bot_token:

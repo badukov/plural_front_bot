@@ -118,6 +118,7 @@ def add_member_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t("import_florality", lang), callback_data="add:import_florality")],
+            [InlineKeyboardButton(text=t("download_florality_avatars", lang), callback_data="add:avatars_florality")],
             [InlineKeyboardButton(text=t("export_json", lang), callback_data="add:export")],
             [InlineKeyboardButton(text=t("cancel", lang), callback_data="add:cancel")],
         ]
@@ -171,14 +172,15 @@ def add_category_selected_keyboard(group_id: str, selected: bool, lang: str = "r
     )
 
 
-def directory_home_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=t("search_by_name", lang), callback_data="dir:search")],
-            [InlineKeyboardButton(text=t("categories", lang), callback_data="dir:cats:0")],
-            [InlineKeyboardButton(text=t("all_members", lang), callback_data="dir:all:0")],
-        ]
-    )
+def directory_home_keyboard(lang: str = "ru", is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=t("search_by_name", lang), callback_data="dir:search")],
+        [InlineKeyboardButton(text=t("categories", lang), callback_data="dir:cats:0")],
+        [InlineKeyboardButton(text=t("all_members", lang), callback_data="dir:all:0")],
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text=button_text("add_member", lang), callback_data="add:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def directory_categories_keyboard(

@@ -878,6 +878,23 @@ class Repository:
             raise RuntimeError("Imported Florality member was not found")
         return member, action
 
+    async def update_member_avatar_url(self, member_id: str, avatar_url: str) -> bool:
+        member = await self.get_member_by_id(member_id)
+        if not member:
+            return False
+        try:
+            raw = json.loads(member.get("raw_json") or "{}")
+        except json.JSONDecodeError:
+            raw = {}
+        raw["avatarUrl"] = avatar_url
+        async with self._connect() as db:
+            await db.execute(
+                "UPDATE members SET avatar_url=?, raw_json=? WHERE id=?",
+                (avatar_url, _json(raw), member_id),
+            )
+            await db.commit()
+        return True
+
     async def replace_front_members(
         self,
         member_ids: list[str],

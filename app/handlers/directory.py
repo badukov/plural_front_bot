@@ -1,8 +1,12 @@
-from aiogram import Router
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+import logging
+from pathlib import Path
 
-from app.access import is_admin_callback
+from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardMarkup, Message
+
+from app.access import is_admin_callback, is_admin_message
 from app.broadcast import broadcast_by_language
 from app.config import settings
 from app.florality import sync_florality_front
@@ -20,6 +24,7 @@ from app.states import DirectorySearchState
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 CATEGORY_PAGE_SIZE = 8
 MEMBER_PAGE_SIZE = 8
@@ -69,7 +74,7 @@ async def open_directory(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer(
         t("directory_home", lang),
-        reply_markup=directory_home_keyboard(lang),
+        reply_markup=directory_home_keyboard(lang, is_admin_message(message)),
     )
 
 
@@ -81,7 +86,7 @@ async def directory_home(callback: CallbackQuery, state: FSMContext) -> None:
     await _edit_or_answer(
         callback,
         t("directory_home", lang),
-        reply_markup=directory_home_keyboard(lang),
+        reply_markup=directory_home_keyboard(lang, is_admin_callback(callback)),
     )
 
 
@@ -312,6 +317,20 @@ async def directory_member_info(callback: CallbackQuery) -> None:
         return
 
     await callback.answer()
+    avatar_value = str(member.get("avatar_url") or "").strip()
+    if callback.message and avatar_value:
+        photo: str | FSInputFile | None = None
+        if avatar_value.startswith(("http://", "https://")):
+            photo = avatar_value
+        else:
+            avatar_path = Path(avatar_value)
+            if avatar_path.is_file():
+                photo = FSInputFile(avatar_path)
+        if photo:
+            try:
+                await callback.message.answer_photo(photo=photo, caption=str(member.get("name") or ""))
+            except TelegramBadRequest as error:
+                logger.warning("Member avatar could not be sent for %s: %s", member_id, error)
     text = await format_member_info(member, lang)
     await _show_chunks(
         callback,

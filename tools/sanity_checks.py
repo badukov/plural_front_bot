@@ -177,6 +177,21 @@ async def main() -> None:
     buttons = member_button_items(matches)
     _assert_callback_data_is_safe(buttons)
     _assert_markup_callback_data_is_safe(directory_home_keyboard())
+    admin_directory_markup = directory_home_keyboard(is_admin=True)
+    user_directory_markup = directory_home_keyboard(is_admin=False)
+    _assert_markup_callback_data_is_safe(admin_directory_markup)
+    admin_directory_callbacks = [
+        button.callback_data
+        for row in admin_directory_markup.inline_keyboard
+        for button in row
+    ]
+    user_directory_callbacks = [
+        button.callback_data
+        for row in user_directory_markup.inline_keyboard
+        for button in row
+    ]
+    _check("admin directory should expose member management", "add:menu" in admin_directory_callbacks)
+    _check("user directory should hide member management", "add:menu" not in user_directory_callbacks)
     admin_member_markup = directory_member_keyboard("member-id", is_admin=True)
     user_member_markup = directory_member_keyboard("member-id", is_admin=False)
     _assert_markup_callback_data_is_safe(admin_member_markup)
@@ -318,6 +333,14 @@ async def main() -> None:
             "created member should be searchable",
             any(row["id"] == member["id"] for row in found),
         )
+
+        avatar_path = str(Path(tmp) / "avatar.jpg")
+        avatar_updated = await temp_repo.update_member_avatar_url(member["id"], avatar_path)
+        member_with_avatar = await temp_repo.get_member_by_id(member["id"])
+        avatar_raw = json.loads(member_with_avatar["raw_json"] or "{}")
+        _check("member avatar update should succeed", avatar_updated)
+        _check("member avatar update should persist database path", member_with_avatar["avatar_url"] == avatar_path)
+        _check("member avatar update should persist export metadata", avatar_raw.get("avatarUrl") == avatar_path)
 
         await temp_repo.upsert_user(
             telegram_user_id=1,

@@ -3,12 +3,15 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from aiogram import Bot
+from PIL import Image
 
 from app.backups import create_database_backup
 from app.broadcast import broadcast_by_language
@@ -51,6 +54,17 @@ class FloralityImportResult:
         return len(self.missing_remote_names)
 
 
+@dataclass(frozen=True)
+class FloralityAvatarSyncResult:
+    downloaded_names: tuple[str, ...] = field(default_factory=tuple)
+    failed_names: tuple[str, ...] = field(default_factory=tuple)
+    skipped_existing: int = 0
+    skipped_ambiguous: int = 0
+    skipped_missing_local: int = 0
+    no_avatar: int = 0
+    remaining: int = 0
+
+
 def _normalized_name(value: object) -> str:
     return str(value or "").strip().casefold()
 
@@ -67,6 +81,7 @@ class FloralityClient:
         self._front_read_forbidden = False
         self._front_write_forbidden = False
         self._front_lock = asyncio.Lock()
+        self._avatar_sync_lock = asyncio.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -210,20 +225,107 @@ class FloralityClient:
         if not data or len(data) > 10 * 1024 * 1024:
             raise OSError("avatar is empty or exceeds 10 MiB")
 
-        extension = {
-            "image/jpeg": ".jpg",
-            "image/png": ".png",
-            "image/gif": ".gif",
-            "image/webp": ".webp",
-        }.get(content_type, ".img")
+        with Image.open(BytesIO(data)) as source:
+            source.seek(0)
+            image = source.convert("RGBA")
+            if image.width + image.height > 10000:
+                image.thumbnail((5000, 5000))
+            background = Image.new("RGB", image.size, "white")
+            background.paste(image, mask=image.getchannel("A"))
+            encoded = BytesIO()
+            background.save(encoded, format="JPEG", quality=90, optimize=True)
+            jpeg_data = encoded.getvalue()
+
         digest = hashlib.sha256(remote_id.encode("utf-8")).hexdigest()[:24]
         avatar_dir = settings.database_path.parent / "avatars" / PROVIDER
         avatar_dir.mkdir(parents=True, exist_ok=True)
-        avatar_file = avatar_dir / f"{digest}{extension}"
+        avatar_file = avatar_dir / f"{digest}.jpg"
         temporary_file = avatar_file.with_suffix(f"{avatar_file.suffix}.tmp")
-        temporary_file.write_bytes(data)
+        temporary_file.write_bytes(jpeg_data)
         temporary_file.replace(avatar_file)
         return str(avatar_file)
+
+    @staticmethod
+    def _has_usable_avatar(member: dict[str, Any]) -> bool:
+        value = str(member.get("avatar_url") or "").strip()
+        if not value:
+            return False
+        if value.startswith(("http://", "https://")):
+            return True
+        path = Path(value)
+        return path.is_file() and path.suffix.casefold() in {".jpg", ".jpeg"}
+
+    async def sync_member_avatars_from_florality(self) -> FloralityAvatarSyncResult:
+        if not self.enabled:
+            return FloralityAvatarSyncResult()
+
+        async with self._avatar_sync_lock:
+            remote_members = await self.list_members()
+            if remote_members is None:
+                return FloralityAvatarSyncResult(failed_names=("Florality API",))
+
+            candidates: list[tuple[dict[str, Any], str, str]] = []
+            skipped_existing = 0
+            skipped_ambiguous = 0
+            skipped_missing_local = 0
+            no_avatar = 0
+
+            for remote_member in remote_members:
+                remote_id = _remote_member_id(remote_member)
+                if not remote_id:
+                    continue
+                if not str(remote_member.get("avatarUrl") or "").strip():
+                    no_avatar += 1
+                    continue
+
+                local_id = await repo.get_local_id_for_external_id(PROVIDER, MEMBER_ENTITY, remote_id)
+                local_member = await repo.get_member_by_id(local_id) if local_id else None
+                if not local_member:
+                    matches = await repo.find_members_by_names(
+                        [
+                            str(remote_member.get("name") or "").strip(),
+                            str(remote_member.get("displayName") or "").strip(),
+                        ]
+                    )
+                    if len({member["id"] for member in matches}) > 1:
+                        skipped_ambiguous += 1
+                        continue
+                    local_member = matches[0] if matches else None
+                    if local_member:
+                        await repo.set_external_id(PROVIDER, MEMBER_ENTITY, str(local_member["id"]), remote_id)
+                if not local_member:
+                    skipped_missing_local += 1
+                    continue
+                if self._has_usable_avatar(local_member):
+                    skipped_existing += 1
+                    continue
+
+                name = str(remote_member.get("name") or remote_member.get("displayName") or remote_id).strip()
+                candidates.append((remote_member, str(local_member["id"]), name))
+
+            batch_size = settings.florality_avatar_batch_size
+            downloaded_names: list[str] = []
+            failed_names: list[str] = []
+            batch = candidates[:batch_size]
+            for index, (remote_member, local_id, name) in enumerate(batch):
+                remote_id = _remote_member_id(remote_member)
+                avatar_path = await self._download_member_avatar(remote_member, str(remote_id or ""))
+                if avatar_path and await repo.update_member_avatar_url(local_id, avatar_path):
+                    downloaded_names.append(name)
+                else:
+                    failed_names.append(name)
+                if index + 1 < len(batch):
+                    await asyncio.sleep(settings.florality_avatar_delay_seconds)
+
+            return FloralityAvatarSyncResult(
+                downloaded_names=tuple(downloaded_names),
+                failed_names=tuple(failed_names),
+                skipped_existing=skipped_existing,
+                skipped_ambiguous=skipped_ambiguous,
+                skipped_missing_local=skipped_missing_local,
+                no_avatar=no_avatar,
+                remaining=max(0, len(candidates) - len(batch)) + len(failed_names),
+            )
 
     async def import_member_from_florality(
         self,
@@ -553,6 +655,10 @@ async def sync_florality_front(front_members: list[dict[str, Any]]) -> None:
 
 async def import_florality_members() -> FloralityImportResult:
     return await florality.import_members_from_florality()
+
+
+async def sync_florality_member_avatars() -> FloralityAvatarSyncResult:
+    return await florality.sync_member_avatars_from_florality()
 
 
 async def run_florality_front_pull(bot: Bot) -> None:

@@ -51,7 +51,7 @@ async def process_front_search(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer(
             t("directory_home", lang),
-            reply_markup=directory_home_keyboard(lang),
+            reply_markup=directory_home_keyboard(lang, True),
         )
         return
 

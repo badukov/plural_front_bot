@@ -56,6 +56,11 @@ TEXTS = {
     "open_children": {"ru": "Открыть вложенные", "en": "Open children", "it": "Apri sottocategorie"},
     "new_member": {"ru": "Новая личность", "en": "New member", "it": "Nuovo membro"},
     "import_florality": {"ru": "Импорт из Florality", "en": "Import from Florality", "it": "Importa da Florality"},
+    "download_florality_avatars": {
+        "ru": "Загрузить аватары из Florality",
+        "en": "Download Florality avatars",
+        "it": "Scarica avatar da Florality",
+    },
     "delete_member": {"ru": "Удалить личность", "en": "Delete member", "it": "Elimina membro"},
     "export_json": {"ru": "Экспорт JSON", "en": "Export JSON", "it": "Esporta JSON"},
     "pronouns": {"ru": "Местоимения", "en": "Pronouns", "it": "Pronomi"},
@@ -177,6 +182,16 @@ TEXTS = {
         "ru": "Проверка Florality запущена...",
         "en": "Florality check started...",
         "it": "Controllo Florality avviato...",
+    },
+    "florality_avatar_sync_started": {
+        "ru": "Загружаю небольшую пачку аватаров из Florality. Это может занять около минуты...",
+        "en": "Downloading a small batch of Florality avatars. This may take about a minute...",
+        "it": "Scarico un piccolo gruppo di avatar da Florality. Potrebbe richiedere circa un minuto...",
+    },
+    "florality_avatar_sync_done": {
+        "ru": "Загрузка аватаров завершена.\n\nЗагружены:\n{downloaded}\n\nОшибки:\n{failed}\n\nУже были: {existing}\nБез аватара во Florality: {no_avatar}\nНеоднозначные совпадения: {ambiguous}\nНет локальной личности: {missing_local}\nОсталось загрузить: {remaining}",
+        "en": "Avatar download finished.\n\nDownloaded:\n{downloaded}\n\nFailed:\n{failed}\n\nAlready present: {existing}\nNo Florality avatar: {no_avatar}\nAmbiguous matches: {ambiguous}\nMissing local member: {missing_local}\nRemaining: {remaining}",
+        "it": "Download avatar completato.\n\nScaricati:\n{downloaded}\n\nErrori:\n{failed}\n\nGia presenti: {existing}\nSenza avatar in Florality: {no_avatar}\nCorrispondenze ambigue: {ambiguous}\nMembro locale assente: {missing_local}\nRimanenti: {remaining}",
     },
     "florality_import_done": {
         "ru": "Проверка Florality завершена.\n\nИмпортированы новые личности:\n{imported}\n\nИзменены во Florality:\n{changed}\n\nНе удалось импортировать:\n{missing_local}\n\nЕсть локально, нет в активном Florality:\n{missing_remote}\n\nБез изменений: {unchanged}\nПропущено (неоднозначные совпадения): {skipped}\nБекап: {backup}",

@@ -3,12 +3,13 @@ import tempfile
 from pathlib import Path
 
 from aiogram import Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
-from app.florality import import_florality_members, sync_florality_member
+from app.florality import import_florality_members, sync_florality_member, sync_florality_member_avatars
 from app.formatters import format_member_brief, split_long_message
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
@@ -144,6 +145,7 @@ async def _finish_member(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_text(t("member_added", lang, brief=brief))
 
 
+@router.message(Command("manage"))
 @router.message(lambda message: is_button_text(message.text, "add_member"))
 async def add_member_menu(message: Message, state: FSMContext) -> None:
     lang = lang_from_message(message)
@@ -156,6 +158,18 @@ async def add_member_menu(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer(t("add_menu", lang), reply_markup=add_member_menu_keyboard(lang))
+
+
+@router.callback_query(lambda callback: callback.data == "add:menu")
+async def add_member_menu_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+    await state.clear()
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(t("add_menu", lang), reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data == "add:cancel")
@@ -218,6 +232,35 @@ async def import_from_florality(callback: CallbackQuery) -> None:
                 chunk,
                 reply_markup=add_member_menu_keyboard(lang) if index == len(chunks) - 1 else None,
             )
+
+
+@router.callback_query(lambda callback: callback.data == "add:avatars_florality")
+async def download_avatars_from_florality(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+    if not settings.florality_api_token:
+        await callback.answer(t("florality_not_configured", lang), show_alert=True)
+        return
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(t("florality_avatar_sync_started", lang))
+    result = await sync_florality_member_avatars()
+    text = t(
+        "florality_avatar_sync_done",
+        lang,
+        downloaded=_names_block(result.downloaded_names),
+        failed=_names_block(result.failed_names),
+        existing=result.skipped_existing,
+        no_avatar=result.no_avatar,
+        ambiguous=result.skipped_ambiguous,
+        missing_local=result.skipped_missing_local,
+        remaining=result.remaining,
+    )
+    if callback.message:
+        await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))
 
 
 @router.callback_query(lambda callback: callback.data == "add:delete")
