@@ -468,6 +468,40 @@ async def main() -> None:
             any(row["id"] == restored_member["id"] for row in restored_search),
         )
 
+        compared_member, compare_action = await temp_repo.compare_florality_member(
+            {
+                "_id": "remote-imported-member",
+                "name": "Florality Imported Member Updated",
+                "pronouns": "they/them ",
+                "about": "Imported test description ",
+            },
+            "remote-imported-member",
+        )
+        _check(
+            "Florality comparison should ignore surrounding whitespace",
+            compared_member is not None and compare_action == "unchanged",
+        )
+
+        await temp_repo.create_member("Ambiguous Florality Name", "", "", [], created_by=1)
+        await temp_repo.create_member("Ambiguous Florality Name", "", "", [], created_by=1)
+        ambiguous_member, ambiguous_action = await temp_repo.compare_florality_member(
+            {"_id": "ambiguous-remote", "name": "Ambiguous Florality Name"},
+            "ambiguous-remote",
+        )
+        _check(
+            "duplicate local names should be reported as an ambiguous Florality match",
+            ambiguous_member is None and ambiguous_action == "ambiguous",
+        )
+        try:
+            await temp_repo.upsert_florality_member(
+                {"_id": "ambiguous-remote", "name": "Ambiguous Florality Name"},
+                "ambiguous-remote",
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("ambiguous Florality import must not create another local member")
+
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "old_users.sqlite3"
         con = sqlite3.connect(db_path)

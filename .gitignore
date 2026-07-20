@@ -6,5 +6,6 @@ data/*.json
 # Локальные данные передаются отдельно от Git.
 data/*.sqlite3
 data/backups/
+data/avatars/
 .venv/
 venv/

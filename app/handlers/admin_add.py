@@ -199,7 +199,7 @@ async def import_from_florality(callback: CallbackQuery) -> None:
     text = t(
         "florality_import_done",
         lang,
-        imported_front=_names_block(result.imported_front_names),
+        imported=_names_block(result.imported_names),
         changed=_names_block(result.changed_names),
         missing_local=_names_block(result.missing_local_names),
         missing_remote=_names_block(result.missing_remote_names),
