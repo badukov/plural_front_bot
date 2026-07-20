@@ -3,6 +3,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 
@@ -35,6 +36,7 @@ from app.keyboards import (
     members_choice_keyboard,
 )
 from app.repository import RU_TO_EN_KEYBOARD, Repository, _cyrillic_to_latin, member_reference, repo
+from app.reminders import MOSCOW_TIMEZONE, next_admin_front_reminder_at
 
 
 MAX_CALLBACK_DATA_BYTES = 64
@@ -378,13 +380,31 @@ async def main() -> None:
         )
         user = await temp_repo.get_user(1)
         _check("user language should be stored", user["language_code"] == "en")
+        admin_users = await temp_repo.get_subscribed_admin_users()
+        _check("subscribed admin lookup should include admin users", [row["telegram_user_id"] for row in admin_users] == [1])
         await temp_repo.update_user_language(1, "it")
         user = await temp_repo.get_user(1)
         _check("user language should update", user["language_code"] == "it")
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should disable initially subscribed user", subscribed is False)
+        _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users())
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should enable disabled user", subscribed is True)
+
+        next_morning = next_admin_front_reminder_at(
+            datetime(2026, 7, 20, 23, 0, tzinfo=MOSCOW_TIMEZONE)
+        )
+        _check(
+            "admin reminder should skip the quiet window",
+            next_morning == datetime(2026, 7, 21, 6, 30, tzinfo=MOSCOW_TIMEZONE),
+        )
+        next_daytime = next_admin_front_reminder_at(
+            datetime(2026, 7, 21, 6, 31, tzinfo=MOSCOW_TIMEZONE)
+        )
+        _check(
+            "admin reminders should repeat every two hours",
+            next_daytime == datetime(2026, 7, 21, 8, 30, tzinfo=MOSCOW_TIMEZONE),
+        )
 
         export = await temp_repo.export_simply_plural_data()
         _check("export should contain created member", len(export["members"]) == 1)

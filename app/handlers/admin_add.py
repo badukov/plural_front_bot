@@ -288,24 +288,59 @@ async def download_categories_from_florality(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         await callback.message.edit_text(t("florality_category_sync_started", lang))
-    result = await sync_florality_imported_member_categories(offset)
+    processed = offset
+    matched = 0
+    unmatched = 0
+    added = 0
+    affected_names: set[str] = set()
+    failed_group_names: set[str] = set()
+    backup_names: list[str] = []
+    remaining = 0
+    next_offset = offset
+
+    while True:
+        result = await sync_florality_imported_member_categories(next_offset)
+        processed += result.processed_groups
+        matched = result.matched_groups
+        unmatched = result.unmatched_groups
+        added += result.added_links
+        affected_names.update(result.affected_names)
+        failed_group_names.update(result.failed_group_names)
+        remaining = result.remaining
+        next_offset = result.next_offset
+        if result.backup_path:
+            backup_names.append(Path(result.backup_path).name)
+
+        if failed_group_names or not remaining:
+            break
+        if callback.message:
+            await callback.message.edit_text(
+                t(
+                    "florality_category_sync_progress",
+                    lang,
+                    processed=processed,
+                    matched=matched,
+                    added=added,
+                )
+            )
+
     text = t(
         "florality_category_sync_done",
         lang,
-        processed=result.processed_groups,
-        matched=result.matched_groups,
-        unmatched=result.unmatched_groups,
-        added=result.added_links,
-        affected=_names_block(result.affected_names),
-        failed=_names_block(result.failed_group_names),
-        remaining=result.remaining,
-        backup=Path(result.backup_path).name if result.backup_path else "-",
+        processed=processed,
+        matched=matched,
+        unmatched=unmatched,
+        added=added,
+        affected=_names_block(tuple(sorted(affected_names))),
+        failed=_names_block(tuple(sorted(failed_group_names))),
+        remaining=remaining,
+        backup=", ".join(backup_names) if backup_names else "-",
     )
     if callback.message:
-        next_offset = result.next_offset if result.remaining else None
+        continuation_offset = next_offset if remaining else None
         await callback.message.edit_text(
             text,
-            reply_markup=add_member_menu_keyboard(lang, category_next_offset=next_offset),
+            reply_markup=add_member_menu_keyboard(lang, category_next_offset=continuation_offset),
         )
 
 

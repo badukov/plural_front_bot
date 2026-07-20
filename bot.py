@@ -10,6 +10,7 @@ from app.database import init_db
 from app.florality import run_florality_front_pull
 from app.import_sp import import_simply_plural_export
 from app.repository import repo
+from app.reminders import run_admin_front_reminders
 from app.user_context import UserLanguageMiddleware
 from app.handlers import (
     start,
@@ -71,12 +72,15 @@ async def main() -> None:
 
     logging.info("Bot started")
     florality_pull_task = asyncio.create_task(run_florality_front_pull(bot))
+    admin_reminder_task = asyncio.create_task(run_admin_front_reminders(bot))
     try:
         await dp.start_polling(bot)
     finally:
-        florality_pull_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await florality_pull_task
+        for task in (florality_pull_task, admin_reminder_task):
+            task.cancel()
+        for task in (florality_pull_task, admin_reminder_task):
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 if __name__ == "__main__":
