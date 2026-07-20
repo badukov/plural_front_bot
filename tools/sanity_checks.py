@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.config import settings
 from app.database import init_db
+from app.florality import FloralityClient
 from app.formatters import (
     current_status_text,
     format_front_history,
@@ -256,6 +257,7 @@ async def main() -> None:
             )
         )
         _assert_markup_callback_data_is_safe(add_member_menu_keyboard())
+        _assert_markup_callback_data_is_safe(add_member_menu_keyboard(category_next_offset=25))
         _assert_markup_callback_data_is_safe(add_choice_keyboard("add:role", root_groups[:3], "Пропустить"))
         _assert_markup_callback_data_is_safe(
             add_category_keyboard(root_groups[:3], selected_count=1, parent_id=None)
@@ -325,6 +327,18 @@ async def main() -> None:
         created_years = await temp_repo.ensure_future_year_groups()
         _check("future year groups should be created on temp database", bool(created_years))
 
+        remote_groups = [
+            {"_id": "remote-root", "name": "Root", "parentId": None},
+            {"_id": "remote-years", "name": "Years of birth", "parentId": "remote-root"},
+            {"_id": "remote-2026", "name": "2026", "parentId": "remote-years"},
+        ]
+        remote_paths = FloralityClient._remote_group_paths(remote_groups)
+        local_paths = FloralityClient._local_group_paths(await temp_repo.get_all_groups())
+        _check(
+            "Florality group paths should match local full paths without the remote root",
+            local_paths.get(remote_paths["remote-2026"]) == "year2026",
+        )
+
         member = await temp_repo.create_member(
             name="Temporary Test Member",
             pronouns="they/them",
@@ -345,6 +359,14 @@ async def main() -> None:
         _check("member avatar update should succeed", avatar_updated)
         _check("member avatar update should persist database path", member_with_avatar["avatar_url"] == avatar_path)
         _check("member avatar update should persist export metadata", avatar_raw.get("avatarUrl") == avatar_path)
+
+        missing_links = await temp_repo.get_missing_member_group_links(
+            [(member["id"], "year2026"), (member["id"], "roles")]
+        )
+        _check("category link lookup should return only missing links", missing_links == [(member["id"], "roles")])
+        added_links, affected_ids = await temp_repo.add_member_group_links(missing_links)
+        _check("category links should be added without replacing existing links", added_links == 1)
+        _check("category link result should report affected member", affected_ids == {member["id"]})
 
         await temp_repo.upsert_user(
             telegram_user_id=1,

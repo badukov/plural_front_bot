@@ -61,6 +61,16 @@ TEXTS = {
         "en": "Download Florality avatars",
         "it": "Scarica avatar da Florality",
     },
+    "download_florality_categories": {
+        "ru": "Загрузить категории из Florality",
+        "en": "Download Florality categories",
+        "it": "Scarica categorie da Florality",
+    },
+    "continue_florality_categories": {
+        "ru": "Продолжить загрузку категорий",
+        "en": "Continue category download",
+        "it": "Continua il download delle categorie",
+    },
     "delete_member": {"ru": "Удалить личность", "en": "Delete member", "it": "Elimina membro"},
     "export_json": {"ru": "Экспорт JSON", "en": "Export JSON", "it": "Esporta JSON"},
     "pronouns": {"ru": "Местоимения", "en": "Pronouns", "it": "Pronomi"},
@@ -192,6 +202,16 @@ TEXTS = {
         "ru": "Загрузка аватаров завершена.\n\nЗагружены:\n{downloaded}\n\nОшибки:\n{failed}\n\nУже были: {existing}\nБез аватара во Florality: {no_avatar}\nНеоднозначные совпадения: {ambiguous}\nНет локальной личности: {missing_local}\nОсталось загрузить: {remaining}",
         "en": "Avatar download finished.\n\nDownloaded:\n{downloaded}\n\nFailed:\n{failed}\n\nAlready present: {existing}\nNo Florality avatar: {no_avatar}\nAmbiguous matches: {ambiguous}\nMissing local member: {missing_local}\nRemaining: {remaining}",
         "it": "Download avatar completato.\n\nScaricati:\n{downloaded}\n\nErrori:\n{failed}\n\nGia presenti: {existing}\nSenza avatar in Florality: {no_avatar}\nCorrispondenze ambigue: {ambiguous}\nMembro locale assente: {missing_local}\nRimanenti: {remaining}",
+    },
+    "florality_category_sync_started": {
+        "ru": "Проверяю небольшую пачку категорий Florality. Это может занять около минуты...",
+        "en": "Checking a small batch of Florality categories. This may take about a minute...",
+        "it": "Controllo un piccolo gruppo di categorie Florality. Potrebbe richiedere circa un minuto...",
+    },
+    "florality_category_sync_done": {
+        "ru": "Загрузка категорий завершена.\n\nОбработано групп: {processed}\nСопоставлено групп всего: {matched}\nБез локального соответствия: {unmatched}\nДобавлено связей: {added}\n\nОбновлены личности:\n{affected}\n\nОшибки групп:\n{failed}\n\nОсталось групп: {remaining}\nБекап: {backup}",
+        "en": "Category download finished.\n\nGroups processed: {processed}\nGroups matched in total: {matched}\nNo local match: {unmatched}\nLinks added: {added}\n\nUpdated members:\n{affected}\n\nFailed groups:\n{failed}\n\nGroups remaining: {remaining}\nBackup: {backup}",
+        "it": "Download categorie completato.\n\nGruppi elaborati: {processed}\nGruppi abbinati totali: {matched}\nSenza corrispondenza locale: {unmatched}\nCollegamenti aggiunti: {added}\n\nMembri aggiornati:\n{affected}\n\nGruppi con errori:\n{failed}\n\nGruppi rimanenti: {remaining}\nBackup: {backup}",
     },
     "florality_import_done": {
         "ru": "Проверка Florality завершена.\n\nИмпортированы новые личности:\n{imported}\n\nИзменены во Florality:\n{changed}\n\nНе удалось импортировать:\n{missing_local}\n\nЕсть локально, нет в активном Florality:\n{missing_remote}\n\nБез изменений: {unchanged}\nПропущено (неоднозначные совпадения): {skipped}\nБекап: {backup}",

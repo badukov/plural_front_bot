@@ -1022,6 +1022,46 @@ class Repository:
             cursor = await db.execute("SELECT * FROM groups WHERE id=?", (group_id,))
             return _row_to_dict(await cursor.fetchone())
 
+    async def get_all_groups(self) -> list[dict[str, Any]]:
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT * FROM groups ORDER BY id")
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def add_member_group_links(self, links: list[tuple[str, str]]) -> tuple[int, set[str]]:
+        """Add category links without removing or replacing existing local data."""
+        added_member_ids: set[str] = set()
+        unique_links = list(dict.fromkeys(links))
+        if not unique_links:
+            return 0, added_member_ids
+
+        added_count = 0
+        async with self._connect() as db:
+            for member_id, group_id in unique_links:
+                cursor = await db.execute(
+                    "INSERT OR IGNORE INTO member_groups(member_id, group_id) VALUES (?, ?)",
+                    (member_id, group_id),
+                )
+                if cursor.rowcount > 0:
+                    added_count += 1
+                    added_member_ids.add(member_id)
+            await db.commit()
+        return added_count, added_member_ids
+
+    async def get_missing_member_group_links(self, links: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        missing: list[tuple[str, str]] = []
+        unique_links = list(dict.fromkeys(links))
+        if not unique_links:
+            return missing
+        async with self._connect() as db:
+            for member_id, group_id in unique_links:
+                cursor = await db.execute(
+                    "SELECT 1 FROM member_groups WHERE member_id=? AND group_id=? LIMIT 1",
+                    (member_id, group_id),
+                )
+                if not await cursor.fetchone():
+                    missing.append((member_id, group_id))
+        return missing
+
     async def ensure_child_group(
         self,
         parent_id: str,

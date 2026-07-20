@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -65,8 +66,31 @@ class FloralityAvatarSyncResult:
     remaining: int = 0
 
 
+@dataclass(frozen=True)
+class FloralityCategorySyncResult:
+    processed_groups: int = 0
+    matched_groups: int = 0
+    unmatched_groups: int = 0
+    added_links: int = 0
+    affected_names: tuple[str, ...] = field(default_factory=tuple)
+    failed_group_names: tuple[str, ...] = field(default_factory=tuple)
+    remaining: int = 0
+    next_offset: int = 0
+    backup_path: str = ""
+
+
 def _normalized_name(value: object) -> str:
     return str(value or "").strip().casefold()
+
+
+def _normalized_path(parts: list[object]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for part in parts:
+        value = unicodedata.normalize("NFKC", str(part or ""))
+        value = " ".join(value.split()).casefold()
+        if value:
+            normalized.append(value)
+    return tuple(normalized)
 
 
 def _remote_member_id(member: dict[str, Any]) -> str | None:
@@ -82,6 +106,7 @@ class FloralityClient:
         self._front_write_forbidden = False
         self._front_lock = asyncio.Lock()
         self._avatar_sync_lock = asyncio.Lock()
+        self._category_sync_lock = asyncio.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -193,6 +218,18 @@ class FloralityClient:
             return [item for item in data if isinstance(item, dict)]
         return None
 
+    async def list_groups(self) -> list[dict[str, Any]] | None:
+        data = await self._request("GET", "/groups")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return None
+
+    async def get_group_layout(self, group_id: str) -> list[dict[str, Any]] | None:
+        data = await self._request("GET", f"/groups/{group_id}/layout")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return None
+
     async def _download_member_avatar(self, remote_member: dict[str, Any], remote_id: str) -> str:
         avatar_path = str(remote_member.get("avatarUrl") or "").strip()
         if not avatar_path:
@@ -243,7 +280,9 @@ class FloralityClient:
         temporary_file = avatar_file.with_suffix(f"{avatar_file.suffix}.tmp")
         temporary_file.write_bytes(jpeg_data)
         temporary_file.replace(avatar_file)
-        return str(avatar_file)
+        # Store an absolute path so Telegram delivery does not depend on the
+        # process working directory used by systemd on the VPS.
+        return str(avatar_file.resolve())
 
     @staticmethod
     def _has_usable_avatar(member: dict[str, Any]) -> bool:
@@ -325,6 +364,164 @@ class FloralityClient:
                 skipped_missing_local=skipped_missing_local,
                 no_avatar=no_avatar,
                 remaining=max(0, len(candidates) - len(batch)) + len(failed_names),
+            )
+
+    @staticmethod
+    def _remote_group_paths(groups: list[dict[str, Any]]) -> dict[str, tuple[str, ...]]:
+        groups_by_id = {
+            str(group.get("_id") or group.get("id")): group
+            for group in groups
+            if group.get("_id") or group.get("id")
+        }
+        paths: dict[str, tuple[str, ...]] = {}
+        for group_id, group in groups_by_id.items():
+            # The canonical root has no parent and is not a local category.
+            if not group.get("parentId"):
+                continue
+            parts: list[object] = [group.get("name")]
+            parent_id = str(group.get("parentId") or "")
+            seen = {group_id}
+            while parent_id and parent_id in groups_by_id and parent_id not in seen:
+                seen.add(parent_id)
+                parent = groups_by_id[parent_id]
+                # Do not include Florality's canonical "Root" node in paths.
+                if not parent.get("parentId"):
+                    break
+                parts.append(parent.get("name"))
+                parent_id = str(parent.get("parentId") or "")
+            path = _normalized_path(list(reversed(parts)))
+            if path:
+                paths[group_id] = path
+        return paths
+
+    @staticmethod
+    def _local_group_paths(groups: list[dict[str, Any]]) -> dict[tuple[str, ...], str]:
+        groups_by_id = {str(group.get("id")): group for group in groups if group.get("id")}
+        ids_by_path: dict[tuple[str, ...], list[str]] = {}
+        for group_id, group in groups_by_id.items():
+            parts: list[object] = [group.get("name")]
+            parent_id = str(group.get("parent_id") or "")
+            seen = {group_id}
+            while parent_id and parent_id != "root" and parent_id in groups_by_id and parent_id not in seen:
+                seen.add(parent_id)
+                parent = groups_by_id[parent_id]
+                parts.append(parent.get("name"))
+                parent_id = str(parent.get("parent_id") or "")
+            path = _normalized_path(list(reversed(parts)))
+            if path:
+                ids_by_path.setdefault(path, []).append(group_id)
+        # A duplicate full path is unsafe to assign automatically.
+        return {path: ids[0] for path, ids in ids_by_path.items() if len(ids) == 1}
+
+    async def sync_imported_member_categories_from_florality(
+        self,
+        offset: int = 0,
+    ) -> FloralityCategorySyncResult:
+        """Add Florality layout categories to members created by the Florality import.
+
+        Existing links are preserved, no links are removed, and no Florality data is
+        mutated. Work is intentionally paged to stay comfortably below API limits.
+        """
+        if not self.enabled:
+            return FloralityCategorySyncResult()
+
+        async with self._category_sync_lock:
+            remote_groups = await self.list_groups()
+            if remote_groups is None:
+                return FloralityCategorySyncResult(failed_group_names=("Florality API",))
+
+            local_groups = await repo.get_all_groups()
+            remote_paths = self._remote_group_paths(remote_groups)
+            local_ids_by_path = self._local_group_paths(local_groups)
+            remote_names = {
+                str(group.get("_id") or group.get("id")): str(group.get("name") or "")
+                for group in remote_groups
+                if group.get("_id") or group.get("id")
+            }
+            candidates = sorted(
+                (
+                    (path, remote_id, local_ids_by_path[path])
+                    for remote_id, path in remote_paths.items()
+                    if path in local_ids_by_path
+                ),
+                key=lambda item: (item[0], item[1]),
+            )
+
+            imported_by_remote_id: dict[str, tuple[str, str]] = {}
+            mappings = await repo.get_external_id_mappings(PROVIDER, MEMBER_ENTITY)
+            for mapping in mappings:
+                local_id = str(mapping.get("local_id") or "")
+                remote_id = str(mapping.get("remote_id") or "")
+                if not local_id or not remote_id:
+                    continue
+                member = await repo.get_member_by_id(local_id)
+                if not member:
+                    continue
+                try:
+                    raw = json.loads(member.get("raw_json") or "{}")
+                except json.JSONDecodeError:
+                    raw = {}
+                florality_meta = raw.get("florality") if isinstance(raw, dict) else None
+                if not isinstance(florality_meta, dict) or str(florality_meta.get("_id") or "") != remote_id:
+                    continue
+                imported_by_remote_id[remote_id] = (local_id, str(member.get("name") or local_id))
+
+            safe_offset = min(max(0, offset), len(candidates))
+            batch_size = settings.florality_category_batch_size
+            batch = candidates[safe_offset : safe_offset + batch_size]
+            links: list[tuple[str, str]] = []
+            failed_group_names: list[str] = []
+            for index, (_path, remote_group_id, local_group_id) in enumerate(batch):
+                layout = await self.get_group_layout(remote_group_id)
+                if layout is None:
+                    failed_group_names.append(remote_names.get(remote_group_id) or remote_group_id)
+                else:
+                    for entry in layout:
+                        if entry.get("type") != "member":
+                            continue
+                        imported = imported_by_remote_id.get(str(entry.get("memberId") or ""))
+                        if imported:
+                            links.append((imported[0], local_group_id))
+                if index + 1 < len(batch):
+                    await asyncio.sleep(settings.florality_category_delay_seconds)
+
+            if failed_group_names:
+                return FloralityCategorySyncResult(
+                    processed_groups=len(batch) - len(failed_group_names),
+                    matched_groups=len(candidates),
+                    unmatched_groups=max(0, len(remote_paths) - len(candidates)),
+                    failed_group_names=tuple(failed_group_names),
+                    remaining=max(0, len(candidates) - safe_offset),
+                    next_offset=safe_offset,
+                )
+
+            backup_path = ""
+            added_count = 0
+            affected_ids: set[str] = set()
+            missing_links = await repo.get_missing_member_group_links(links)
+            if missing_links:
+                backup = await create_database_backup("florality_categories")
+                backup_path = str(backup)
+                added_count, affected_ids = await repo.add_member_group_links(missing_links)
+
+            next_offset = safe_offset + len(batch)
+            remaining = max(0, len(candidates) - next_offset)
+            if not remaining:
+                next_offset = 0
+            affected_names = sorted(
+                imported_by_remote_id[remote_id][1]
+                for remote_id in imported_by_remote_id
+                if imported_by_remote_id[remote_id][0] in affected_ids
+            )
+            return FloralityCategorySyncResult(
+                processed_groups=len(batch),
+                matched_groups=len(candidates),
+                unmatched_groups=max(0, len(remote_paths) - len(candidates)),
+                added_links=added_count,
+                affected_names=tuple(affected_names),
+                remaining=remaining,
+                next_offset=next_offset,
+                backup_path=backup_path,
             )
 
     async def import_member_from_florality(
@@ -659,6 +856,10 @@ async def import_florality_members() -> FloralityImportResult:
 
 async def sync_florality_member_avatars() -> FloralityAvatarSyncResult:
     return await florality.sync_member_avatars_from_florality()
+
+
+async def sync_florality_imported_member_categories(offset: int = 0) -> FloralityCategorySyncResult:
+    return await florality.sync_imported_member_categories_from_florality(offset)
 
 
 async def run_florality_front_pull(bot: Bot) -> None:
