@@ -115,11 +115,28 @@ def search_results_keyboard(members: list[dict[str, Any]], lang: str = "ru") -> 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def add_member_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
+def add_member_menu_keyboard(
+    lang: str = "ru",
+    category_next_offset: int | None = None,
+) -> InlineKeyboardMarkup:
+    category_callback = (
+        f"add:categories_florality:{category_next_offset}"
+        if category_next_offset is not None
+        else "add:categories_florality:0"
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=t("import_florality", lang), callback_data="add:import_florality")],
             [InlineKeyboardButton(text=t("download_florality_avatars", lang), callback_data="add:avatars_florality")],
+            [
+                InlineKeyboardButton(
+                    text=t(
+                        "continue_florality_categories" if category_next_offset is not None else "download_florality_categories",
+                        lang,
+                    ),
+                    callback_data=category_callback,
+                )
+            ],
             [InlineKeyboardButton(text=t("export_json", lang), callback_data="add:export")],
             [InlineKeyboardButton(text=t("cancel", lang), callback_data="add:cancel")],
         ]

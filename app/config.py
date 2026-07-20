@@ -51,6 +51,8 @@ class Settings:
     florality_create_missing_members_enabled: bool
     florality_avatar_batch_size: int
     florality_avatar_delay_seconds: float
+    florality_category_batch_size: int
+    florality_category_delay_seconds: float
 
 
 settings = Settings(
@@ -71,6 +73,8 @@ settings = Settings(
     florality_create_missing_members_enabled=_bool("FLORALITY_CREATE_MISSING_MEMBERS_ENABLED", False),
     florality_avatar_batch_size=max(1, int(os.getenv("FLORALITY_AVATAR_BATCH_SIZE", "25"))),
     florality_avatar_delay_seconds=max(0.2, float(os.getenv("FLORALITY_AVATAR_DELAY_SECONDS", "1"))),
+    florality_category_batch_size=max(1, int(os.getenv("FLORALITY_CATEGORY_BATCH_SIZE", "25"))),
+    florality_category_delay_seconds=max(0.2, float(os.getenv("FLORALITY_CATEGORY_DELAY_SECONDS", "1"))),
 )
 
 if not settings.bot_token:

@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 from aiogram import Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardMarkup, Message
 
@@ -330,7 +330,7 @@ async def directory_member_info(callback: CallbackQuery) -> None:
         if photo:
             try:
                 await callback.message.answer_photo(photo=photo, caption=str(member.get("name") or ""))
-            except TelegramBadRequest as error:
+            except (TelegramAPIError, OSError) as error:
                 logger.warning("Member avatar could not be sent for %s: %s", member_id, error)
     text = await format_member_info(member, lang)
     await _show_chunks(

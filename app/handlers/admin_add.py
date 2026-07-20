@@ -9,7 +9,12 @@ from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.access import is_admin_callback, is_admin_message
 from app.config import settings
-from app.florality import import_florality_members, sync_florality_member, sync_florality_member_avatars
+from app.florality import (
+    import_florality_members,
+    sync_florality_imported_member_categories,
+    sync_florality_member,
+    sync_florality_member_avatars,
+)
 from app.formatters import format_member_brief, split_long_message
 from app.i18n import is_button_text, lang_from_callback, lang_from_message, t
 from app.keyboards import (
@@ -261,6 +266,47 @@ async def download_avatars_from_florality(callback: CallbackQuery) -> None:
     )
     if callback.message:
         await callback.message.edit_text(text, reply_markup=add_member_menu_keyboard(lang))
+
+
+@router.callback_query(
+    lambda callback: callback.data and callback.data.startswith("add:categories_florality:")
+)
+async def download_categories_from_florality(callback: CallbackQuery) -> None:
+    lang = lang_from_callback(callback)
+    if not is_admin_callback(callback):
+        await callback.answer(t("not_enough_rights", lang), show_alert=True)
+        return
+    if not settings.florality_api_token:
+        await callback.answer(t("florality_not_configured", lang), show_alert=True)
+        return
+
+    try:
+        offset = max(0, int((callback.data or "").rsplit(":", 1)[-1]))
+    except ValueError:
+        offset = 0
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(t("florality_category_sync_started", lang))
+    result = await sync_florality_imported_member_categories(offset)
+    text = t(
+        "florality_category_sync_done",
+        lang,
+        processed=result.processed_groups,
+        matched=result.matched_groups,
+        unmatched=result.unmatched_groups,
+        added=result.added_links,
+        affected=_names_block(result.affected_names),
+        failed=_names_block(result.failed_group_names),
+        remaining=result.remaining,
+        backup=Path(result.backup_path).name if result.backup_path else "-",
+    )
+    if callback.message:
+        next_offset = result.next_offset if result.remaining else None
+        await callback.message.edit_text(
+            text,
+            reply_markup=add_member_menu_keyboard(lang, category_next_offset=next_offset),
+        )
 
 
 @router.callback_query(lambda callback: callback.data == "add:delete")
