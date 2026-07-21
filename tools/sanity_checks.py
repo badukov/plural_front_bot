@@ -463,7 +463,10 @@ async def main() -> None:
         history_sessions = await temp_repo.get_front_sessions(limit=5)
         history_text = format_front_history(history_sessions)
         _check("front history should show member sessions", member["name"] in history_text)
-        _check("front history should show a local interval and duration", " – " in history_text and history_text.endswith("m"))
+        _check(
+            "front history should show a user-local Telegram interval and duration",
+            history_text.count('<tg-time unix="') == 2 and " – " in history_text and history_text.endswith("m"),
+        )
         _check("front history text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(history_text)))
         stats = await temp_repo.get_front_statistics(days=30)
         _check("front statistics should count history rows", stats["changes"] == 1)
