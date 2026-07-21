@@ -367,6 +367,7 @@ async def directory_add_to_front(callback: CallbackQuery) -> None:
                 front_members,
                 user_lang,
             ),
+            photo_members=[member],
         )
         text = t("front_added", lang, name=member["name"], status=status)
     else:
@@ -409,6 +410,7 @@ async def directory_replace_front(callback: CallbackQuery) -> None:
                 front_members,
                 user_lang,
             ),
+            photo_members=[member],
         )
 
     await callback.answer(t("ready", lang))
