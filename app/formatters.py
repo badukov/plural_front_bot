@@ -1,7 +1,6 @@
 import json
 import re
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any
 from html import escape
 
@@ -10,12 +9,6 @@ from app.repository import repo
 
 
 IMAGE_MD_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-MOSCOW_TIMEZONE = timezone(timedelta(hours=3))
-MONTHS = {
-    "ru": ("янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."),
-    "en": ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
-    "it": ("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"),
-}
 
 EVENT_LABELS = {
     "initial": {"ru": "начальное состояние", "en": "initial state", "it": "stato iniziale"},
@@ -180,17 +173,11 @@ def format_front_history(rows: list[dict[str, Any]], lang: str = "ru") -> str:
         started_at = int(row.get("started_at") or 0)
         ended_value = row.get("ended_at")
         ended_at = int(ended_value) if ended_value is not None else int(time.time() * 1000)
-        start_text = _history_date_time(started_at, lang)
-        end_text = _history_date_time(ended_at, lang)
+        start_text = telegram_time_text(started_at)
+        end_text = telegram_time_text(ended_at)
         duration = _history_duration(max(0, ended_at - started_at))
-        lines.append(f"{name}\n{escape(start_text)} – {escape(end_text)}\n{duration}")
+        lines.append(f"{name}\n{start_text} – {end_text}\n{duration}")
     return "\n\n".join(lines)
-
-
-def _history_date_time(timestamp_ms: int, lang: str) -> str:
-    value = datetime.fromtimestamp(timestamp_ms / 1000, tz=MOSCOW_TIMEZONE)
-    months = MONTHS.get(lang, MONTHS["ru"])
-    return f"{value.day} {months[value.month - 1]}, {value:%H:%M}"
 
 
 def _history_duration(duration_ms: int) -> str:
