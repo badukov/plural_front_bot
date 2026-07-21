@@ -44,7 +44,7 @@ async def send_admin_front_reminder(bot: Bot) -> None:
     front_members = await repo.get_current_front_members()
     for admin in admins:
         telegram_user_id = int(admin["telegram_user_id"])
-        lang = normalize_lang(admin.get("language_code"))
+        lang = normalize_lang(admin.get("language_override") or admin.get("language_code"))
         text = t(
             "admin_front_check_reminder",
             lang,
@@ -69,4 +69,3 @@ async def run_admin_front_reminders(bot: Bot) -> None:
         delay = max(1.0, (next_reminder - now).total_seconds())
         await asyncio.sleep(delay)
         await send_admin_front_reminder(bot)
-

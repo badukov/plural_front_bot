@@ -3,6 +3,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -390,6 +391,12 @@ async def main() -> None:
         await temp_repo.update_user_language(1, "it")
         user = await temp_repo.get_user(1)
         _check("user language should update", user["language_code"] == "it")
+        await temp_repo.update_user_language_override(1, "ru")
+        user = await temp_repo.get_user(1)
+        _check("language override should be stored", user["language_override"] == "ru")
+        await temp_repo.update_user_language_override(1, None)
+        user = await temp_repo.get_user(1)
+        _check("automatic language mode should clear override", user["language_override"] is None)
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should disable initially subscribed user", subscribed is False)
         _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users({1}))
@@ -458,6 +465,54 @@ async def main() -> None:
         _check("front statistics should use formatted Telegram time", '<tg-time unix="' in stats_text and 'format="dt"' in stats_text)
         _check("front statistics text should include percentage", "100.0%" in stats_text)
         _check("front statistics text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(stats_text)))
+
+        now_ms = int(time.time() * 1000)
+        day_ms = 24 * 60 * 60 * 1000
+        sessions = [
+            {
+                "session_id": "old-session",
+                "remote_member_id": "remote-member-id",
+                "local_member_id": member["id"],
+                "member_name": member["name"],
+                "started_at": now_ms - 40 * day_ms,
+                "ended_at": now_ms - 40 * day_ms + 60 * 60 * 1000,
+                "edited_at": now_ms - 39 * day_ms,
+                "edited_manually": True,
+                "raw": {"session": {"_id": "old-session"}},
+            },
+            {
+                "session_id": "recent-session",
+                "remote_member_id": "remote-member-id",
+                "local_member_id": member["id"],
+                "member_name": member["name"],
+                "started_at": now_ms - 2 * 60 * 60 * 1000,
+                "ended_at": now_ms - 60 * 60 * 1000,
+                "edited_at": None,
+                "edited_manually": False,
+                "raw": {"session": {"_id": "recent-session"}},
+            },
+        ]
+        inserted, changed = await temp_repo.upsert_florality_front_sessions(sessions)
+        _check("Florality sessions should be inserted", (inserted, changed) == (2, 0))
+        inserted, changed = await temp_repo.upsert_florality_front_sessions(sessions)
+        _check("unchanged Florality sessions should be ignored", (inserted, changed) == (0, 0))
+        sessions[1]["ended_at"] = now_ms - 30 * 60 * 1000
+        sessions[1]["edited_at"] = now_ms
+        sessions[1]["edited_manually"] = True
+        inserted, changed = await temp_repo.upsert_florality_front_sessions([sessions[1]])
+        _check("retroactively edited Florality session should be detected", (inserted, changed) == (0, 1))
+        archived = await temp_repo.archive_florality_front_sessions(now_ms - 30 * day_ms)
+        _check("sessions older than the active window should be archived", archived == 1)
+        _check("archived sessions should remain available", await temp_repo.count_florality_front_sessions() == 2)
+        recent_stats = await temp_repo.get_florality_front_statistics(days=30)
+        all_stats = await temp_repo.get_florality_front_statistics(days=None)
+        _check("30-day stats should omit archived old sessions", recent_stats["changes"] == 1)
+        _check("all-time stats should include archived sessions", all_stats["changes"] == 2)
+        _check("Florality stats should use session durations", recent_stats["duration_based"] is True)
+        archived_stats_text = format_front_statistics(all_stats)
+        _check("all-time duration stats should render", "100.0%" in archived_stats_text)
+        await temp_repo.set_sync_state("history-test", "complete")
+        _check("history sync state should persist", await temp_repo.get_sync_state("history-test") == "complete")
 
         imported_member, import_action = await temp_repo.upsert_florality_member(
             {

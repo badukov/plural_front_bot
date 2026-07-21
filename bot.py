@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.config import settings
 from app.database import init_db
-from app.florality import run_florality_front_pull
+from app.florality import run_florality_front_pull, run_florality_history_pull
 from app.import_sp import import_simply_plural_export
 from app.repository import repo
 from app.reminders import run_admin_front_reminders
@@ -21,6 +21,7 @@ from app.handlers import (
     admin_add,
     directory,
     callbacks,
+    language,
     global_search,
 )
 
@@ -62,6 +63,7 @@ async def main() -> None:
     dp.callback_query.middleware(language_middleware)
 
     dp.include_router(start.router)
+    dp.include_router(language.router)
     dp.include_router(info.router)
     dp.include_router(notifications.router)
     dp.include_router(history.router)
@@ -73,13 +75,14 @@ async def main() -> None:
 
     logging.info("Bot started")
     florality_pull_task = asyncio.create_task(run_florality_front_pull(bot))
+    florality_history_task = asyncio.create_task(run_florality_history_pull())
     admin_reminder_task = asyncio.create_task(run_admin_front_reminders(bot))
     try:
         await dp.start_polling(bot)
     finally:
-        for task in (florality_pull_task, admin_reminder_task):
+        for task in (florality_pull_task, florality_history_task, admin_reminder_task):
             task.cancel()
-        for task in (florality_pull_task, admin_reminder_task):
+        for task in (florality_pull_task, florality_history_task, admin_reminder_task):
             with suppress(asyncio.CancelledError):
                 await task
 
