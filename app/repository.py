@@ -303,6 +303,15 @@ class Repository:
             )
             await db.commit()
 
+    async def update_user_language_override(self, telegram_user_id: int, language: str | None) -> bool:
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "UPDATE users SET language_override=?, updated_at=? WHERE telegram_user_id=?",
+                (language, _now_ms(), telegram_user_id),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
     async def set_user_subscribed(self, telegram_user_id: int, subscribed: bool) -> None:
         async with self._connect() as db:
             await db.execute(
@@ -345,10 +354,34 @@ class Repository:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_subscribed_admin_users(self) -> list[dict[str, Any]]:
+    async def sync_admin_flags(self, admin_ids: set[int]) -> None:
+        async with self._connect() as db:
+            await db.execute("UPDATE users SET is_admin=0")
+            if admin_ids:
+                placeholders = ",".join("?" for _ in admin_ids)
+                await db.execute(
+                    f"UPDATE users SET is_admin=1 WHERE telegram_user_id IN ({placeholders})",
+                    tuple(sorted(admin_ids)),
+                )
+            await db.commit()
+
+    async def get_subscribed_admin_users(
+        self,
+        admin_ids: set[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        active_admin_ids = settings.admin_ids if admin_ids is None else admin_ids
+        if not active_admin_ids:
+            return []
+        placeholders = ",".join("?" for _ in active_admin_ids)
         async with self._connect() as db:
             cursor = await db.execute(
-                "SELECT * FROM users WHERE subscribed=1 AND is_admin=1 ORDER BY created_at"
+                f"""
+                SELECT *
+                FROM users
+                WHERE subscribed=1 AND telegram_user_id IN ({placeholders})
+                ORDER BY created_at
+                """,
+                tuple(sorted(active_admin_ids)),
             )
             return [dict(row) for row in await cursor.fetchall()]
 
@@ -492,6 +525,40 @@ class Repository:
                 (event_type, created_by, _now_ms(), _pack_json(snapshot)),
             )
             await db.commit()
+        await self.archive_front_history()
+
+    async def archive_front_history(self, older_than_ms: int | None = None) -> int:
+        if older_than_ms is None:
+            older_than_ms = _now_ms() - settings.front_history_active_days * 24 * 60 * 60 * 1000
+        archived_at = _now_ms()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) AS c FROM front_history WHERE created_at < ?",
+                (older_than_ms,),
+            )
+            count = int((await cursor.fetchone())["c"])
+            if not count:
+                return 0
+            await db.execute(
+                """
+                INSERT INTO front_history_archive(
+                    id, event_type, created_by, created_at, snapshot_json_z, archived_at
+                )
+                SELECT id, event_type, created_by, created_at, snapshot_json_z, ?
+                FROM front_history
+                WHERE created_at < ?
+                ON CONFLICT(id) DO UPDATE SET
+                    event_type=excluded.event_type,
+                    created_by=excluded.created_by,
+                    created_at=excluded.created_at,
+                    snapshot_json_z=excluded.snapshot_json_z,
+                    archived_at=excluded.archived_at
+                """,
+                (archived_at, older_than_ms),
+            )
+            await db.execute("DELETE FROM front_history WHERE created_at < ?", (older_than_ms,))
+            await db.commit()
+            return count
 
     async def count_front_history(self) -> int:
         async with self._connect() as db:
@@ -529,32 +596,274 @@ class Repository:
             )
         return result
 
-    async def get_front_statistics(self, days: int = 30) -> dict[str, Any]:
-        since = _now_ms() - days * 24 * 60 * 60 * 1000
+    async def get_sync_state(self, key: str) -> str | None:
+        async with self._connect() as db:
+            cursor = await db.execute("SELECT value FROM sync_state WHERE key=?", (key,))
+            row = await cursor.fetchone()
+            return str(row["value"]) if row else None
+
+    async def set_sync_state(self, key: str, value: str) -> None:
+        now = _now_ms()
+        async with self._connect() as db:
+            await db.execute(
+                """
+                INSERT INTO sync_state(key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                """,
+                (key, value, now),
+            )
+            await db.commit()
+
+    async def upsert_florality_front_sessions(self, sessions: list[dict[str, Any]]) -> tuple[int, int]:
+        inserted = 0
+        changed = 0
+        synced_at = _now_ms()
+        async with self._connect() as db:
+            for item in sessions:
+                session_id = str(item.get("session_id") or "")
+                if not session_id:
+                    continue
+                values = (
+                    str(item.get("remote_member_id") or ""),
+                    str(item.get("local_member_id") or "") or None,
+                    str(item.get("member_name") or item.get("remote_member_id") or ""),
+                    int(item.get("started_at") or 0),
+                    int(item["ended_at"]) if item.get("ended_at") is not None else None,
+                    int(item["edited_at"]) if item.get("edited_at") is not None else None,
+                    1 if item.get("edited_manually") else 0,
+                    synced_at,
+                    _json(item.get("raw") or {}),
+                )
+                cursor = await db.execute(
+                    """
+                    SELECT remote_member_id, local_member_id, member_name, started_at,
+                           ended_at, edited_at, edited_manually
+                    FROM florality_front_sessions WHERE session_id=?
+                    UNION ALL
+                    SELECT remote_member_id, local_member_id, member_name, started_at,
+                           ended_at, edited_at, edited_manually
+                    FROM florality_front_sessions_archive WHERE session_id=?
+                    LIMIT 1
+                    """,
+                    (session_id, session_id),
+                )
+                existing = await cursor.fetchone()
+                if existing is None:
+                    inserted += 1
+                else:
+                    comparable = tuple(existing[key] for key in (
+                        "remote_member_id", "local_member_id", "member_name", "started_at",
+                        "ended_at", "edited_at", "edited_manually",
+                    ))
+                    if comparable != values[:7]:
+                        changed += 1
+                await db.execute(
+                    "DELETE FROM florality_front_sessions_archive WHERE session_id=?",
+                    (session_id,),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO florality_front_sessions(
+                        session_id, remote_member_id, local_member_id, member_name,
+                        started_at, ended_at, edited_at, edited_manually, synced_at, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        remote_member_id=excluded.remote_member_id,
+                        local_member_id=excluded.local_member_id,
+                        member_name=excluded.member_name,
+                        started_at=excluded.started_at,
+                        ended_at=excluded.ended_at,
+                        edited_at=excluded.edited_at,
+                        edited_manually=excluded.edited_manually,
+                        synced_at=excluded.synced_at,
+                        raw_json=excluded.raw_json
+                    """,
+                    (session_id, *values),
+                )
+            await db.commit()
+        return inserted, changed
+
+    async def archive_florality_front_sessions(self, older_than_ms: int) -> int:
+        archived_at = _now_ms()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) AS c FROM florality_front_sessions WHERE ended_at IS NOT NULL AND ended_at < ?",
+                (older_than_ms,),
+            )
+            count = int((await cursor.fetchone())["c"])
+            if not count:
+                return 0
+            await db.execute(
+                """
+                INSERT INTO florality_front_sessions_archive(
+                    session_id, remote_member_id, local_member_id, member_name,
+                    started_at, ended_at, edited_at, edited_manually,
+                    synced_at, archived_at, raw_json
+                )
+                SELECT session_id, remote_member_id, local_member_id, member_name,
+                       started_at, ended_at, edited_at, edited_manually,
+                       synced_at, ?, raw_json
+                FROM florality_front_sessions
+                WHERE ended_at IS NOT NULL AND ended_at < ?
+                ON CONFLICT(session_id) DO UPDATE SET
+                    remote_member_id=excluded.remote_member_id,
+                    local_member_id=excluded.local_member_id,
+                    member_name=excluded.member_name,
+                    started_at=excluded.started_at,
+                    ended_at=excluded.ended_at,
+                    edited_at=excluded.edited_at,
+                    edited_manually=excluded.edited_manually,
+                    synced_at=excluded.synced_at,
+                    archived_at=excluded.archived_at,
+                    raw_json=excluded.raw_json
+                """,
+                (archived_at, older_than_ms),
+            )
+            await db.execute(
+                "DELETE FROM florality_front_sessions WHERE ended_at IS NOT NULL AND ended_at < ?",
+                (older_than_ms,),
+            )
+            await db.commit()
+            return count
+
+    async def count_florality_front_sessions(self) -> int:
         async with self._connect() as db:
             cursor = await db.execute(
                 """
-                SELECT event_type, created_at, snapshot_json_z
-                FROM front_history
-                WHERE created_at >= ?
-                ORDER BY created_at ASC, id ASC
+                SELECT
+                    (SELECT COUNT(*) FROM florality_front_sessions) +
+                    (SELECT COUNT(*) FROM florality_front_sessions_archive) AS c
+                """
+            )
+            return int((await cursor.fetchone())["c"])
+
+    async def get_florality_front_statistics(self, days: int | None = 30) -> dict[str, Any]:
+        now = _now_ms()
+        since = now - days * 24 * 60 * 60 * 1000 if days is not None else 0
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT session_id, remote_member_id, member_name, started_at, ended_at, edited_at
+                FROM florality_front_sessions
+                WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)
+                UNION ALL
+                SELECT session_id, remote_member_id, member_name, started_at, ended_at, edited_at
+                FROM florality_front_sessions_archive
+                WHERE started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)
+                ORDER BY started_at ASC
                 """,
-                (since,),
+                (now, since, now, since),
             )
             rows = [dict(row) for row in await cursor.fetchall()]
 
-        member_counts: dict[str, int] = {}
+        durations: dict[str, int] = {}
+        session_counts: dict[str, int] = {}
+        member_names: dict[str, str] = {}
         day_counts: dict[str, int] = {}
-        blur_count = 0
-        unique_names: set[str] = set()
         last_change_at = 0
         for row in rows:
-            last_change_at = max(last_change_at, int(row["created_at"]))
+            name = str(row.get("member_name") or "").strip()
+            if not name:
+                continue
+            member_key = str(row.get("remote_member_id") or name)
+            member_names[member_key] = name
+            started_at = max(since, int(row["started_at"]))
+            ended_at = min(now, int(row["ended_at"]) if row.get("ended_at") is not None else now)
+            duration = max(0, ended_at - started_at)
+            durations[member_key] = durations.get(member_key, 0) + duration
+            session_counts[member_key] = session_counts.get(member_key, 0) + 1
+            day = time.strftime("%Y-%m-%d", time.gmtime(int(row["started_at"]) / 1000))
+            day_counts[day] = day_counts.get(day, 0) + 1
+            last_change_at = max(
+                last_change_at,
+                int(row.get("edited_at") or row.get("ended_at") or row["started_at"]),
+            )
+
+        sorted_members = sorted(
+            durations.items(),
+            key=lambda item: (-item[1], member_names[item[0]].casefold(), item[0]),
+        )
+        total_duration = sum(durations.values())
+        return {
+            "days": days if days is not None else "all",
+            "duration_based": True,
+            "changes": len(rows),
+            "blur_count": 0,
+            "unique_count": len(durations),
+            "top_members": [(member_names[key], duration) for key, duration in sorted_members[:5]],
+            "front_percentages": [
+                {
+                    "name": member_names[key],
+                    "count": session_counts.get(key, 0),
+                    "duration_ms": duration,
+                    "percent": (duration / total_duration * 100) if total_duration else 0.0,
+                }
+                for key, duration in sorted_members
+            ],
+            "total_front_appearances": sum(session_counts.values()),
+            "total_duration_ms": total_duration,
+            "busiest_day": max(day_counts.items(), key=lambda item: item[1]) if day_counts else None,
+            "last_change_at": last_change_at,
+        }
+
+    async def get_front_statistics(self, days: int | None = 30) -> dict[str, Any]:
+        if await self.count_florality_front_sessions():
+            return await self.get_florality_front_statistics(days)
+        now = _now_ms()
+        since = now - days * 24 * 60 * 60 * 1000 if days is not None else 0
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT id, event_type, created_at, snapshot_json_z
+                FROM (
+                    SELECT id, event_type, created_at, snapshot_json_z FROM front_history
+                    UNION ALL
+                    SELECT id, event_type, created_at, snapshot_json_z FROM front_history_archive
+                )
+                WHERE created_at >= ? AND created_at <= ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (since, now),
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+            if since:
+                cursor = await db.execute(
+                    """
+                    SELECT id, event_type, created_at, snapshot_json_z
+                    FROM (
+                        SELECT id, event_type, created_at, snapshot_json_z FROM front_history
+                        UNION ALL
+                        SELECT id, event_type, created_at, snapshot_json_z FROM front_history_archive
+                    )
+                    WHERE created_at < ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (since,),
+                )
+                baseline = await cursor.fetchone()
+                if baseline:
+                    rows.insert(0, dict(baseline))
+
+        durations: dict[str, int] = {}
+        session_counts: dict[str, int] = {}
+        member_names: dict[str, str] = {}
+        day_counts: dict[str, int] = {}
+        blur_count = 0
+        last_change_at = 0
+        previous_member_ids: set[str] = set()
+        changes = 0
+        for index, row in enumerate(rows):
+            created_at = int(row["created_at"])
+            next_created_at = int(rows[index + 1]["created_at"]) if index + 1 < len(rows) else now
+            interval_start = max(since, created_at)
+            interval_end = min(now, next_created_at)
             try:
                 snapshot = _unpack_json(row["snapshot_json_z"])
             except Exception:
                 snapshot = {"members": []}
             members = snapshot.get("members") if isinstance(snapshot, dict) else []
+            current_member_ids: set[str] = set()
             if not members:
                 blur_count += 1
             for member in members:
@@ -563,33 +872,44 @@ class Repository:
                 name = str(member.get("name") or "").strip()
                 if not name:
                     continue
-                unique_names.add(name)
-                member_counts[name] = member_counts.get(name, 0) + 1
+                member_key = str(member.get("id") or name)
+                current_member_ids.add(member_key)
+                member_names[member_key] = name
+                duration = max(0, interval_end - interval_start)
+                durations[member_key] = durations.get(member_key, 0) + duration
+            for member_key in current_member_ids - previous_member_ids:
+                session_counts[member_key] = session_counts.get(member_key, 0) + 1
+            previous_member_ids = current_member_ids
+            if created_at >= since:
+                changes += 1
+                last_change_at = max(last_change_at, created_at)
+                day = time.strftime("%Y-%m-%d", time.gmtime(created_at / 1000))
+                day_counts[day] = day_counts.get(day, 0) + 1
 
-            day = time.strftime("%Y-%m-%d", time.gmtime(int(row["created_at"]) / 1000))
-            day_counts[day] = day_counts.get(day, 0) + 1
-
-        sorted_members = sorted(member_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
-        total_front_appearances = sum(member_counts.values())
-        front_percentages = [
-            {
-                "name": name,
-                "count": count,
-                "percent": (count / total_front_appearances * 100) if total_front_appearances else 0.0,
-            }
-            for name, count in sorted_members
-        ]
-        top_members = sorted_members[:5]
-        busiest_day = max(day_counts.items(), key=lambda item: item[1]) if day_counts else None
+        sorted_members = sorted(
+            durations.items(),
+            key=lambda item: (-item[1], member_names[item[0]].casefold(), item[0]),
+        )
+        total_duration = sum(durations.values())
         return {
-            "days": days,
-            "changes": len(rows),
+            "days": days if days is not None else "all",
+            "duration_based": True,
+            "changes": changes,
             "blur_count": blur_count,
-            "unique_count": len(unique_names),
-            "top_members": top_members,
-            "front_percentages": front_percentages,
-            "total_front_appearances": total_front_appearances,
-            "busiest_day": busiest_day,
+            "unique_count": len(durations),
+            "top_members": [(member_names[key], duration) for key, duration in sorted_members[:5]],
+            "front_percentages": [
+                {
+                    "name": member_names[key],
+                    "count": session_counts.get(key, 0),
+                    "duration_ms": duration,
+                    "percent": (duration / total_duration * 100) if total_duration else 0.0,
+                }
+                for key, duration in sorted_members
+            ],
+            "total_front_appearances": sum(session_counts.values()),
+            "total_duration_ms": total_duration,
+            "busiest_day": max(day_counts.items(), key=lambda item: item[1]) if day_counts else None,
             "last_change_at": last_change_at,
         }
 

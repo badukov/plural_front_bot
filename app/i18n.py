@@ -1,8 +1,11 @@
+from contextvars import ContextVar, Token
+
 from aiogram.types import CallbackQuery, Message, User
 
 
 SUPPORTED_LANGS = {"ru", "en", "it"}
 DEFAULT_LANG = "ru"
+CURRENT_LANGUAGE: ContextVar[str | None] = ContextVar("current_language", default=None)
 
 
 BUTTON_LABELS = {
@@ -92,6 +95,16 @@ TEXTS = {
         "it": "Puoi usare info fronte, elenco, cronologia e notifiche.\nMembri nel database: {count}.",
     },
     "buttons_updated": {"ru": "Кнопки обновлены.", "en": "Buttons updated.", "it": "Pulsanti aggiornati."},
+    "language_command_usage": {
+        "ru": "Текущий режим языка: {current}.\nИспользование: /language ru, /language en, /language it или /language auto.",
+        "en": "Current language mode: {current}.\nUsage: /language ru, /language en, /language it, or /language auto.",
+        "it": "Modalità lingua attuale: {current}.\nUso: /language ru, /language en, /language it oppure /language auto.",
+    },
+    "language_changed": {
+        "ru": "Язык изменён: {language}.",
+        "en": "Language changed: {language}.",
+        "it": "Lingua modificata: {language}.",
+    },
     "admin_only": {
         "ru": "Управление фронтом доступно только админам.",
         "en": "Front management is only available to admins.",
@@ -157,10 +170,14 @@ TEXTS = {
         "it": "La cronologia e vuota per ora. I nuovi cambi del fronte saranno salvati da questo aggiornamento.",
     },
     "stats_title": {"ru": "Статистика за {days} дней:", "en": "Stats for {days} days:", "it": "Statistiche per {days} giorni:"},
+    "stats_title_all": {"ru": "Статистика за всё время:", "en": "All-time statistics:", "it": "Statistiche complessive:"},
     "stats_changes": {"ru": "Изменений фронта: {count}", "en": "Front changes: {count}", "it": "Cambi fronte: {count}"},
+    "stats_sessions": {"ru": "Сессий фронта: {count}", "en": "Front sessions: {count}", "it": "Sessioni al fronte: {count}"},
+    "stats_total_time": {"ru": "Суммарное время: {duration}", "en": "Total time: {duration}", "it": "Tempo totale: {duration}"},
     "stats_unique": {"ru": "Уникальных фронтеров: {count}", "en": "Unique fronters: {count}", "it": "Fronter unici: {count}"},
     "stats_blur": {"ru": "Блюров: {count}", "en": "Blur events: {count}", "it": "Eventi blur: {count}"},
     "stats_top": {"ru": "Чаще всего появлялись:", "en": "Most frequent:", "it": "Piu frequenti:"},
+    "stats_top_time": {"ru": "Больше всего времени на фронте:", "en": "Most time in front:", "it": "Più tempo al fronte:"},
     "stats_distribution": {
         "ru": "Доля фронта:",
         "en": "Front share:",
@@ -168,6 +185,11 @@ TEXTS = {
     },
     "stats_busiest_day": {"ru": "Самый активный день: {day} ({count})", "en": "Busiest day: {day} ({count})", "it": "Giorno piu attivo: {day} ({count})"},
     "stats_last_change": {"ru": "Последнее изменение: {time}", "en": "Last change: {time}", "it": "Ultimo cambio: {time}"},
+    "stats_command_usage": {
+        "ru": "Использование: /stats 30, /stats 90 или /stats all.",
+        "en": "Usage: /stats 30, /stats 90, or /stats all.",
+        "it": "Uso: /stats 30, /stats 90 oppure /stats all.",
+    },
     "directory_home": {
         "ru": "Справочник: выберите способ просмотра.",
         "en": "Directory: choose how to browse.",
@@ -277,7 +299,15 @@ def normalize_lang(language_code: str | None) -> str:
 
 
 def lang_from_user(user: User | None) -> str:
-    return normalize_lang(user.language_code if user else None)
+    return CURRENT_LANGUAGE.get() or normalize_lang(user.language_code if user else None)
+
+
+def set_current_language(language: str | None) -> Token:
+    return CURRENT_LANGUAGE.set(normalize_lang(language) if language else None)
+
+
+def reset_current_language(token: Token) -> None:
+    CURRENT_LANGUAGE.reset(token)
 
 
 def lang_from_message(message: Message) -> str:

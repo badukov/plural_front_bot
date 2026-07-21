@@ -184,15 +184,25 @@ def format_front_history(rows: list[dict[str, Any]], lang: str = "ru") -> str:
 
 
 def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
-    lines = [escape(t("stats_title", lang, days=stats["days"]))]
-    lines.append(escape(t("stats_changes", lang, count=stats["changes"])))
+    if stats.get("days") == "all":
+        lines = [escape(t("stats_title_all", lang))]
+    else:
+        lines = [escape(t("stats_title", lang, days=stats["days"]))]
+    duration_based = bool(stats.get("duration_based"))
+    lines.append(escape(t("stats_sessions" if duration_based else "stats_changes", lang, count=stats["changes"])))
     lines.append(escape(t("stats_unique", lang, count=stats["unique_count"])))
-    lines.append(escape(t("stats_blur", lang, count=stats["blur_count"])))
+    if duration_based:
+        lines.append(escape(t("stats_total_time", lang, duration=_duration_text(int(stats.get("total_duration_ms") or 0), lang))))
+    else:
+        lines.append(escape(t("stats_blur", lang, count=stats["blur_count"])))
 
     top_members = stats.get("top_members") or []
     if top_members:
-        top_lines = [f"- {escape(str(name))}: {count}" for name, count in top_members]
-        lines.append(escape(t("stats_top", lang)) + "\n" + "\n".join(top_lines))
+        top_lines = [
+            f"- {escape(str(name))}: {_duration_text(int(value), lang) if duration_based else value}"
+            for name, value in top_members
+        ]
+        lines.append(escape(t("stats_top_time" if duration_based else "stats_top", lang)) + "\n" + "\n".join(top_lines))
     else:
         lines.append(escape(t("stats_top", lang)) + "\n-")
 
@@ -203,7 +213,11 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
             name = escape(str(item.get("name") or ""))
             count = int(item.get("count") or 0)
             percent = float(item.get("percent") or 0)
-            percent_lines.append(f"- {name}: {percent:.1f}% ({count})")
+            if duration_based:
+                duration = _duration_text(int(item.get("duration_ms") or 0), lang)
+                percent_lines.append(f"- {name}: {percent:.1f}% ({duration}, {count})")
+            else:
+                percent_lines.append(f"- {name}: {percent:.1f}% ({count})")
         lines.append(escape(t("stats_distribution", lang)) + "\n" + "\n".join(percent_lines))
     else:
         lines.append(escape(t("stats_distribution", lang)) + "\n-")
@@ -216,6 +230,24 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
     if last_change_at:
         lines.append(escape(t("stats_last_change", lang, time="{time}")).replace("{time}", telegram_time_text(last_change_at)))
     return "\n\n".join(lines)
+
+
+def _duration_text(duration_ms: int, lang: str = "en") -> str:
+    minutes = max(0, duration_ms // 60_000)
+    days, minutes = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(minutes, 60)
+    units = {
+        "ru": ("д", "ч", "мин"),
+        "it": ("g", "h", "min"),
+    }.get(lang, ("d", "h", "m"))
+    parts = []
+    if days:
+        parts.append(f"{days}{units[0]}")
+    if hours:
+        parts.append(f"{hours}{units[1]}")
+    if minutes or not parts:
+        parts.append(f"{minutes}{units[2]}")
+    return " ".join(parts)
 
 
 def split_long_message(text: str, limit: int = 3900) -> list[str]:

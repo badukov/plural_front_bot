@@ -22,7 +22,7 @@ async def broadcast_by_language(bot: Bot, text_builder: Callable[[str], str | Aw
     for user in users:
         chat_id = user["chat_id"]
         telegram_user_id = user["telegram_user_id"]
-        lang = normalize_lang(user.get("language_code"))
+        lang = normalize_lang(user.get("language_override") or user.get("language_code"))
         maybe_text = text_builder(lang)
         text = await maybe_text if inspect.isawaitable(maybe_text) else maybe_text
         try:

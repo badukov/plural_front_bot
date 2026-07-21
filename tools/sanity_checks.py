@@ -3,6 +3,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -381,16 +382,29 @@ async def main() -> None:
         )
         user = await temp_repo.get_user(1)
         _check("user language should be stored", user["language_code"] == "en")
-        admin_users = await temp_repo.get_subscribed_admin_users()
+        admin_users = await temp_repo.get_subscribed_admin_users({1})
         _check("subscribed admin lookup should include admin users", [row["telegram_user_id"] for row in admin_users] == [1])
+        _check(
+            "admin reminder recipients should follow current ADMIN_IDS instead of stale database flags",
+            not await temp_repo.get_subscribed_admin_users(set()),
+        )
         await temp_repo.update_user_language(1, "it")
         user = await temp_repo.get_user(1)
         _check("user language should update", user["language_code"] == "it")
+        await temp_repo.update_user_language_override(1, "ru")
+        user = await temp_repo.get_user(1)
+        _check("language override should be stored", user["language_override"] == "ru")
+        await temp_repo.update_user_language_override(1, None)
+        user = await temp_repo.get_user(1)
+        _check("automatic language mode should clear override", user["language_override"] is None)
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should disable initially subscribed user", subscribed is False)
-        _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users())
+        _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users({1}))
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should enable disabled user", subscribed is True)
+        await temp_repo.sync_admin_flags(set())
+        user = await temp_repo.get_user(1)
+        _check("admin flag synchronization should clear removed admins", not user["is_admin"])
 
         next_morning = next_admin_front_reminder_at(
             datetime(2026, 7, 20, 23, 0, tzinfo=MOSCOW_TIMEZONE)
@@ -451,6 +465,76 @@ async def main() -> None:
         _check("front statistics should use formatted Telegram time", '<tg-time unix="' in stats_text and 'format="dt"' in stats_text)
         _check("front statistics text should include percentage", "100.0%" in stats_text)
         _check("front statistics text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(stats_text)))
+
+        now_ms = int(time.time() * 1000)
+        day_ms = 24 * 60 * 60 * 1000
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute("UPDATE front_history SET created_at=?", (now_ms - 40 * day_ms,))
+        con.commit()
+        con.close()
+        await temp_repo.record_current_front_history("recent_front_snapshot", created_by=None)
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM front_history")
+        active_history_count = int(cur.fetchone()[0])
+        cur.execute("SELECT COUNT(*) FROM front_history_archive")
+        archived_history_count = int(cur.fetchone()[0])
+        con.close()
+        _check("bot history older than 30 days should leave the active table", active_history_count == 1)
+        _check("old bot history should remain in the archive table", archived_history_count == 1)
+        internal_recent_stats = await temp_repo.get_front_statistics(days=30)
+        internal_all_stats = await temp_repo.get_front_statistics(days=None)
+        _check("internal bot stats should use front durations", internal_recent_stats["duration_based"] is True)
+        _check("internal 30-day stats should use the archived baseline", internal_recent_stats["total_duration_ms"] >= 29 * day_ms)
+        _check("continuous front state should count as one session", internal_recent_stats["total_front_appearances"] == 1)
+        _check("all-time internal stats should read archived snapshots", internal_all_stats["changes"] == 2)
+
+        sessions = [
+            {
+                "session_id": "old-session",
+                "remote_member_id": "remote-member-id",
+                "local_member_id": member["id"],
+                "member_name": member["name"],
+                "started_at": now_ms - 40 * day_ms,
+                "ended_at": now_ms - 40 * day_ms + 60 * 60 * 1000,
+                "edited_at": now_ms - 39 * day_ms,
+                "edited_manually": True,
+                "raw": {"session": {"_id": "old-session"}},
+            },
+            {
+                "session_id": "recent-session",
+                "remote_member_id": "remote-member-id",
+                "local_member_id": member["id"],
+                "member_name": member["name"],
+                "started_at": now_ms - 2 * 60 * 60 * 1000,
+                "ended_at": now_ms - 60 * 60 * 1000,
+                "edited_at": None,
+                "edited_manually": False,
+                "raw": {"session": {"_id": "recent-session"}},
+            },
+        ]
+        inserted, changed = await temp_repo.upsert_florality_front_sessions(sessions)
+        _check("Florality sessions should be inserted", (inserted, changed) == (2, 0))
+        inserted, changed = await temp_repo.upsert_florality_front_sessions(sessions)
+        _check("unchanged Florality sessions should be ignored", (inserted, changed) == (0, 0))
+        sessions[1]["ended_at"] = now_ms - 30 * 60 * 1000
+        sessions[1]["edited_at"] = now_ms
+        sessions[1]["edited_manually"] = True
+        inserted, changed = await temp_repo.upsert_florality_front_sessions([sessions[1]])
+        _check("retroactively edited Florality session should be detected", (inserted, changed) == (0, 1))
+        archived = await temp_repo.archive_florality_front_sessions(now_ms - 30 * day_ms)
+        _check("sessions older than the active window should be archived", archived == 1)
+        _check("archived sessions should remain available", await temp_repo.count_florality_front_sessions() == 2)
+        recent_stats = await temp_repo.get_florality_front_statistics(days=30)
+        all_stats = await temp_repo.get_florality_front_statistics(days=None)
+        _check("30-day stats should omit archived old sessions", recent_stats["changes"] == 1)
+        _check("all-time stats should include archived sessions", all_stats["changes"] == 2)
+        _check("Florality stats should use session durations", recent_stats["duration_based"] is True)
+        archived_stats_text = format_front_statistics(all_stats)
+        _check("all-time duration stats should render", "100.0%" in archived_stats_text)
+        await temp_repo.set_sync_state("history-test", "complete")
+        _check("history sync state should persist", await temp_repo.get_sync_state("history-test") == "complete")
 
         imported_member, import_action = await temp_repo.upsert_florality_member(
             {
@@ -644,10 +728,13 @@ async def main() -> None:
         external_ids_exists = cur.fetchone() is not None
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='front_history'")
         front_history_exists = cur.fetchone() is not None
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='front_history_archive'")
+        front_history_archive_exists = cur.fetchone() is not None
         con.close()
         _check("users migration should add language_code", "language_code" in user_columns)
         _check("init should create external id mappings table", external_ids_exists)
         _check("init should create front history table", front_history_exists)
+        _check("init should create front history archive table", front_history_archive_exists)
 
     print("Sanity checks passed.")
     print(

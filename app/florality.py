@@ -2,13 +2,14 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 from aiogram import Bot
@@ -78,6 +79,16 @@ class FloralityCategorySyncResult:
     remaining: int = 0
     next_offset: int = 0
     backup_path: str = ""
+
+
+@dataclass(frozen=True)
+class FloralityHistorySyncResult:
+    fetched: int = 0
+    inserted: int = 0
+    changed: int = 0
+    archived: int = 0
+    full_backfill: bool = False
+    failed: bool = False
 
 
 def _normalized_name(value: object) -> str:
@@ -230,6 +241,97 @@ class FloralityClient:
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         return None
+
+    async def list_front_history(self, start_time: int | None = None) -> list[dict[str, Any]] | None:
+        items: list[dict[str, Any]] = []
+        cursor: dict[str, Any] | None = None
+        while True:
+            params: dict[str, object] = {"limit": 100}
+            if start_time is not None:
+                params["startTime"] = start_time
+            if cursor:
+                params["cursorStartedAt"] = cursor["startedAt"]
+                params["cursorId"] = cursor["id"]
+            data = await self._request("GET", f"/front/history?{urlencode(params)}")
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                return None
+            items.extend(item for item in data["items"] if isinstance(item, dict))
+            next_cursor = data.get("nextCursor")
+            if not isinstance(next_cursor, dict) or not next_cursor.get("startedAt") or not next_cursor.get("id"):
+                return items
+            cursor = next_cursor
+            await asyncio.sleep(settings.florality_history_page_delay_seconds)
+
+    async def sync_front_history_from_florality(self) -> FloralityHistorySyncResult:
+        if not self.enabled:
+            return FloralityHistorySyncResult()
+
+        full_backfill = await repo.get_sync_state("florality_history_backfill_complete") != "1"
+        now = int(time.time() * 1000)
+        active_window = settings.florality_history_active_days * 24 * 60 * 60 * 1000
+        start_time = None if full_backfill else now - active_window
+        items = await self.list_front_history(start_time=start_time)
+        if items is None:
+            return FloralityHistorySyncResult(full_backfill=full_backfill, failed=True)
+
+        mappings = await repo.get_external_id_mappings(PROVIDER, MEMBER_ENTITY)
+        remote_to_local = {
+            str(mapping["remote_id"]): str(mapping["local_id"])
+            for mapping in mappings
+        }
+        local_members = {
+            str(member["id"]): member
+            for member in await repo.get_all_members_page(limit=100_000)
+        }
+        sessions: list[dict[str, Any]] = []
+        for item in items:
+            session = item.get("session")
+            member = item.get("member")
+            if not isinstance(session, dict):
+                continue
+            member_data = member if isinstance(member, dict) else {}
+            session_id = str(session.get("_id") or session.get("id") or "")
+            remote_member_id = str(session.get("memberId") or "")
+            started_at = int(session.get("startedAt") or 0)
+            if not session_id or not remote_member_id or not started_at:
+                continue
+
+            local_id = remote_to_local.get(remote_member_id)
+            local_member = local_members.get(local_id or "")
+            member_name = str(member_data.get("name") or member_data.get("displayName") or remote_member_id)
+            if not local_member:
+                local_member = await repo.find_unique_member_by_names([member_name])
+                if local_member:
+                    local_id = str(local_member["id"])
+                    await repo.set_external_id(PROVIDER, MEMBER_ENTITY, local_id, remote_member_id)
+                    remote_to_local[remote_member_id] = local_id
+                    local_members[local_id] = local_member
+
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "remote_member_id": remote_member_id,
+                    "local_member_id": local_id or "",
+                    "member_name": str(local_member.get("name") if local_member else member_name),
+                    "started_at": started_at,
+                    "ended_at": session.get("endedAt"),
+                    "edited_at": session.get("editedAt"),
+                    "edited_manually": bool(session.get("editedManually")),
+                    "raw": item,
+                }
+            )
+
+        inserted, changed = await repo.upsert_florality_front_sessions(sessions)
+        if full_backfill:
+            await repo.set_sync_state("florality_history_backfill_complete", "1")
+        archived = await repo.archive_florality_front_sessions(now - active_window)
+        return FloralityHistorySyncResult(
+            fetched=len(sessions),
+            inserted=inserted,
+            changed=changed,
+            archived=archived,
+            full_backfill=full_backfill,
+        )
 
     async def _download_member_avatar(self, remote_member: dict[str, Any], remote_id: str) -> str:
         avatar_path = str(remote_member.get("avatarUrl") or "").strip()
@@ -893,3 +995,28 @@ async def run_florality_front_pull(bot: Bot) -> None:
                     lang,
                 ),
             )
+
+
+async def run_florality_history_pull() -> None:
+    if not florality.enabled:
+        return
+
+    interval = settings.florality_history_pull_interval_seconds
+    logger.info("Florality history pull started with %s second interval", interval)
+    while True:
+        try:
+            result = await florality.sync_front_history_from_florality()
+            if result.failed:
+                logger.warning("Florality history sync failed; retrying in %s seconds", interval)
+            else:
+                logger.info(
+                    "Florality history sync: fetched=%s inserted=%s changed=%s archived=%s full_backfill=%s",
+                    result.fetched,
+                    result.inserted,
+                    result.changed,
+                    result.archived,
+                    result.full_backfill,
+                )
+        except Exception:
+            logger.exception("Unexpected Florality history sync error")
+        await asyncio.sleep(interval)
