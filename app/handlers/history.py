@@ -21,7 +21,7 @@ async def _answer_chunks(message: Message, text: str, reply_markup: InlineKeyboa
 @router.message(lambda message: is_button_text(message.text, "history"))
 async def show_history(message: Message) -> None:
     lang = lang_from_message(message)
-    rows = await repo.get_front_history(limit=20)
+    rows = await repo.get_front_sessions(limit=20)
     await _answer_chunks(message, format_front_history(rows, lang), history_keyboard(lang))
 
 
@@ -69,5 +69,5 @@ async def show_history_callback(callback: CallbackQuery) -> None:
     if not callback.message:
         return
 
-    rows = await repo.get_front_history(limit=20)
+    rows = await repo.get_front_sessions(limit=20)
     await _answer_chunks(callback.message, format_front_history(rows, lang), history_keyboard(lang))

@@ -61,6 +61,7 @@ async def set_front_callback(callback: CallbackQuery) -> None:
                 front_members,
                 user_lang,
             ),
+            photo_members=[member],
         )
         answer_text = t("front_added", lang, name=member["name"], status=status)
     else:
@@ -102,6 +103,7 @@ async def remove_front_callback(callback: CallbackQuery) -> None:
                 front_members,
                 user_lang,
             ),
+            photo_members=[member],
         )
     else:
         text = t("not_in_front", lang, name=member["name"], status=status)
