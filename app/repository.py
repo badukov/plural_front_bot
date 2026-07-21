@@ -345,10 +345,34 @@ class Repository:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_subscribed_admin_users(self) -> list[dict[str, Any]]:
+    async def sync_admin_flags(self, admin_ids: set[int]) -> None:
+        async with self._connect() as db:
+            await db.execute("UPDATE users SET is_admin=0")
+            if admin_ids:
+                placeholders = ",".join("?" for _ in admin_ids)
+                await db.execute(
+                    f"UPDATE users SET is_admin=1 WHERE telegram_user_id IN ({placeholders})",
+                    tuple(sorted(admin_ids)),
+                )
+            await db.commit()
+
+    async def get_subscribed_admin_users(
+        self,
+        admin_ids: set[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        active_admin_ids = settings.admin_ids if admin_ids is None else admin_ids
+        if not active_admin_ids:
+            return []
+        placeholders = ",".join("?" for _ in active_admin_ids)
         async with self._connect() as db:
             cursor = await db.execute(
-                "SELECT * FROM users WHERE subscribed=1 AND is_admin=1 ORDER BY created_at"
+                f"""
+                SELECT *
+                FROM users
+                WHERE subscribed=1 AND telegram_user_id IN ({placeholders})
+                ORDER BY created_at
+                """,
+                tuple(sorted(active_admin_ids)),
             )
             return [dict(row) for row in await cursor.fetchall()]
 

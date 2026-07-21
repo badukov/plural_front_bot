@@ -381,16 +381,23 @@ async def main() -> None:
         )
         user = await temp_repo.get_user(1)
         _check("user language should be stored", user["language_code"] == "en")
-        admin_users = await temp_repo.get_subscribed_admin_users()
+        admin_users = await temp_repo.get_subscribed_admin_users({1})
         _check("subscribed admin lookup should include admin users", [row["telegram_user_id"] for row in admin_users] == [1])
+        _check(
+            "admin reminder recipients should follow current ADMIN_IDS instead of stale database flags",
+            not await temp_repo.get_subscribed_admin_users(set()),
+        )
         await temp_repo.update_user_language(1, "it")
         user = await temp_repo.get_user(1)
         _check("user language should update", user["language_code"] == "it")
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should disable initially subscribed user", subscribed is False)
-        _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users())
+        _check("unsubscribed admins should not receive reminders", not await temp_repo.get_subscribed_admin_users({1}))
         subscribed = await temp_repo.toggle_user_subscribed(1)
         _check("toggle should enable disabled user", subscribed is True)
+        await temp_repo.sync_admin_flags(set())
+        user = await temp_repo.get_user(1)
+        _check("admin flag synchronization should clear removed admins", not user["is_admin"])
 
         next_morning = next_admin_front_reminder_at(
             datetime(2026, 7, 20, 23, 0, tzinfo=MOSCOW_TIMEZONE)

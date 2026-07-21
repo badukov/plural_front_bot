@@ -35,6 +35,7 @@ async def main() -> None:
         logging.warning("ADMIN_IDS is empty: member management and front controls will be unavailable")
 
     await init_db(settings.database_path)
+    await repo.sync_admin_flags(settings.admin_ids)
 
     if settings.auto_import_on_start:
         if settings.sp_export_path.exists():
