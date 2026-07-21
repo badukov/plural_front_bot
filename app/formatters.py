@@ -192,14 +192,14 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
     lines.append(escape(t("stats_sessions" if duration_based else "stats_changes", lang, count=stats["changes"])))
     lines.append(escape(t("stats_unique", lang, count=stats["unique_count"])))
     if duration_based:
-        lines.append(escape(t("stats_total_time", lang, duration=_duration_text(int(stats.get("total_duration_ms") or 0)))))
+        lines.append(escape(t("stats_total_time", lang, duration=_duration_text(int(stats.get("total_duration_ms") or 0), lang))))
     else:
         lines.append(escape(t("stats_blur", lang, count=stats["blur_count"])))
 
     top_members = stats.get("top_members") or []
     if top_members:
         top_lines = [
-            f"- {escape(str(name))}: {_duration_text(int(value)) if duration_based else value}"
+            f"- {escape(str(name))}: {_duration_text(int(value), lang) if duration_based else value}"
             for name, value in top_members
         ]
         lines.append(escape(t("stats_top_time" if duration_based else "stats_top", lang)) + "\n" + "\n".join(top_lines))
@@ -214,7 +214,7 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
             count = int(item.get("count") or 0)
             percent = float(item.get("percent") or 0)
             if duration_based:
-                duration = _duration_text(int(item.get("duration_ms") or 0))
+                duration = _duration_text(int(item.get("duration_ms") or 0), lang)
                 percent_lines.append(f"- {name}: {percent:.1f}% ({duration}, {count})")
             else:
                 percent_lines.append(f"- {name}: {percent:.1f}% ({count})")
@@ -232,17 +232,21 @@ def format_front_statistics(stats: dict[str, Any], lang: str = "ru") -> str:
     return "\n\n".join(lines)
 
 
-def _duration_text(duration_ms: int) -> str:
+def _duration_text(duration_ms: int, lang: str = "en") -> str:
     minutes = max(0, duration_ms // 60_000)
     days, minutes = divmod(minutes, 24 * 60)
     hours, minutes = divmod(minutes, 60)
+    units = {
+        "ru": ("д", "ч", "мин"),
+        "it": ("g", "h", "min"),
+    }.get(lang, ("d", "h", "m"))
     parts = []
     if days:
-        parts.append(f"{days}d")
+        parts.append(f"{days}{units[0]}")
     if hours:
-        parts.append(f"{hours}h")
+        parts.append(f"{hours}{units[1]}")
     if minutes or not parts:
-        parts.append(f"{minutes}m")
+        parts.append(f"{minutes}{units[2]}")
     return " ".join(parts)
 
 

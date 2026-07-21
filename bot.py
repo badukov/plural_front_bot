@@ -37,6 +37,7 @@ async def main() -> None:
 
     await init_db(settings.database_path)
     await repo.sync_admin_flags(settings.admin_ids)
+    await repo.archive_front_history()
 
     if settings.auto_import_on_start:
         if settings.sp_export_path.exists():

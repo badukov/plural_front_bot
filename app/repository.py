@@ -525,6 +525,40 @@ class Repository:
                 (event_type, created_by, _now_ms(), _pack_json(snapshot)),
             )
             await db.commit()
+        await self.archive_front_history()
+
+    async def archive_front_history(self, older_than_ms: int | None = None) -> int:
+        if older_than_ms is None:
+            older_than_ms = _now_ms() - settings.front_history_active_days * 24 * 60 * 60 * 1000
+        archived_at = _now_ms()
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) AS c FROM front_history WHERE created_at < ?",
+                (older_than_ms,),
+            )
+            count = int((await cursor.fetchone())["c"])
+            if not count:
+                return 0
+            await db.execute(
+                """
+                INSERT INTO front_history_archive(
+                    id, event_type, created_by, created_at, snapshot_json_z, archived_at
+                )
+                SELECT id, event_type, created_by, created_at, snapshot_json_z, ?
+                FROM front_history
+                WHERE created_at < ?
+                ON CONFLICT(id) DO UPDATE SET
+                    event_type=excluded.event_type,
+                    created_by=excluded.created_by,
+                    created_at=excluded.created_at,
+                    snapshot_json_z=excluded.snapshot_json_z,
+                    archived_at=excluded.archived_at
+                """,
+                (archived_at, older_than_ms),
+            )
+            await db.execute("DELETE FROM front_history WHERE created_at < ?", (older_than_ms,))
+            await db.commit()
+            return count
 
     async def count_front_history(self) -> int:
         async with self._connect() as db:
@@ -772,34 +806,64 @@ class Repository:
             "last_change_at": last_change_at,
         }
 
-    async def get_front_statistics(self, days: int = 30) -> dict[str, Any]:
+    async def get_front_statistics(self, days: int | None = 30) -> dict[str, Any]:
         if await self.count_florality_front_sessions():
             return await self.get_florality_front_statistics(days)
-        since = _now_ms() - days * 24 * 60 * 60 * 1000
+        now = _now_ms()
+        since = now - days * 24 * 60 * 60 * 1000 if days is not None else 0
         async with self._connect() as db:
             cursor = await db.execute(
                 """
-                SELECT event_type, created_at, snapshot_json_z
-                FROM front_history
-                WHERE created_at >= ?
+                SELECT id, event_type, created_at, snapshot_json_z
+                FROM (
+                    SELECT id, event_type, created_at, snapshot_json_z FROM front_history
+                    UNION ALL
+                    SELECT id, event_type, created_at, snapshot_json_z FROM front_history_archive
+                )
+                WHERE created_at >= ? AND created_at <= ?
                 ORDER BY created_at ASC, id ASC
                 """,
-                (since,),
+                (since, now),
             )
             rows = [dict(row) for row in await cursor.fetchall()]
+            if since:
+                cursor = await db.execute(
+                    """
+                    SELECT id, event_type, created_at, snapshot_json_z
+                    FROM (
+                        SELECT id, event_type, created_at, snapshot_json_z FROM front_history
+                        UNION ALL
+                        SELECT id, event_type, created_at, snapshot_json_z FROM front_history_archive
+                    )
+                    WHERE created_at < ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (since,),
+                )
+                baseline = await cursor.fetchone()
+                if baseline:
+                    rows.insert(0, dict(baseline))
 
-        member_counts: dict[str, int] = {}
+        durations: dict[str, int] = {}
+        session_counts: dict[str, int] = {}
+        member_names: dict[str, str] = {}
         day_counts: dict[str, int] = {}
         blur_count = 0
-        unique_names: set[str] = set()
         last_change_at = 0
-        for row in rows:
-            last_change_at = max(last_change_at, int(row["created_at"]))
+        previous_member_ids: set[str] = set()
+        changes = 0
+        for index, row in enumerate(rows):
+            created_at = int(row["created_at"])
+            next_created_at = int(rows[index + 1]["created_at"]) if index + 1 < len(rows) else now
+            interval_start = max(since, created_at)
+            interval_end = min(now, next_created_at)
             try:
                 snapshot = _unpack_json(row["snapshot_json_z"])
             except Exception:
                 snapshot = {"members": []}
             members = snapshot.get("members") if isinstance(snapshot, dict) else []
+            current_member_ids: set[str] = set()
             if not members:
                 blur_count += 1
             for member in members:
@@ -808,33 +872,44 @@ class Repository:
                 name = str(member.get("name") or "").strip()
                 if not name:
                     continue
-                unique_names.add(name)
-                member_counts[name] = member_counts.get(name, 0) + 1
+                member_key = str(member.get("id") or name)
+                current_member_ids.add(member_key)
+                member_names[member_key] = name
+                duration = max(0, interval_end - interval_start)
+                durations[member_key] = durations.get(member_key, 0) + duration
+            for member_key in current_member_ids - previous_member_ids:
+                session_counts[member_key] = session_counts.get(member_key, 0) + 1
+            previous_member_ids = current_member_ids
+            if created_at >= since:
+                changes += 1
+                last_change_at = max(last_change_at, created_at)
+                day = time.strftime("%Y-%m-%d", time.gmtime(created_at / 1000))
+                day_counts[day] = day_counts.get(day, 0) + 1
 
-            day = time.strftime("%Y-%m-%d", time.gmtime(int(row["created_at"]) / 1000))
-            day_counts[day] = day_counts.get(day, 0) + 1
-
-        sorted_members = sorted(member_counts.items(), key=lambda item: (-item[1], item[0].casefold()))
-        total_front_appearances = sum(member_counts.values())
-        front_percentages = [
-            {
-                "name": name,
-                "count": count,
-                "percent": (count / total_front_appearances * 100) if total_front_appearances else 0.0,
-            }
-            for name, count in sorted_members
-        ]
-        top_members = sorted_members[:5]
-        busiest_day = max(day_counts.items(), key=lambda item: item[1]) if day_counts else None
+        sorted_members = sorted(
+            durations.items(),
+            key=lambda item: (-item[1], member_names[item[0]].casefold(), item[0]),
+        )
+        total_duration = sum(durations.values())
         return {
-            "days": days,
-            "changes": len(rows),
+            "days": days if days is not None else "all",
+            "duration_based": True,
+            "changes": changes,
             "blur_count": blur_count,
-            "unique_count": len(unique_names),
-            "top_members": top_members,
-            "front_percentages": front_percentages,
-            "total_front_appearances": total_front_appearances,
-            "busiest_day": busiest_day,
+            "unique_count": len(durations),
+            "top_members": [(member_names[key], duration) for key, duration in sorted_members[:5]],
+            "front_percentages": [
+                {
+                    "name": member_names[key],
+                    "count": session_counts.get(key, 0),
+                    "duration_ms": duration,
+                    "percent": (duration / total_duration * 100) if total_duration else 0.0,
+                }
+                for key, duration in sorted_members
+            ],
+            "total_front_appearances": sum(session_counts.values()),
+            "total_duration_ms": total_duration,
+            "busiest_day": max(day_counts.items(), key=lambda item: item[1]) if day_counts else None,
             "last_change_at": last_change_at,
         }
 

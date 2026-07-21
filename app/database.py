@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS front_history (
     snapshot_json_z TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS front_history_archive (
+    id INTEGER PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    snapshot_json_z TEXT NOT NULL,
+    archived_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS florality_front_sessions (
     session_id TEXT PRIMARY KEY,
     remote_member_id TEXT NOT NULL,
@@ -130,6 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_member_groups_group ON member_groups(group_id);
 CREATE INDEX IF NOT EXISTS idx_front_state_fronted_at ON front_state(fronted_at);
 CREATE INDEX IF NOT EXISTS idx_external_ids_remote ON external_ids(provider, entity_type, remote_id);
 CREATE INDEX IF NOT EXISTS idx_front_history_created_at ON front_history(created_at);
+CREATE INDEX IF NOT EXISTS idx_front_history_archive_created_at ON front_history_archive(created_at);
 CREATE INDEX IF NOT EXISTS idx_florality_sessions_started ON florality_front_sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_florality_sessions_ended ON florality_front_sessions(ended_at);
 CREATE INDEX IF NOT EXISTS idx_florality_sessions_archive_started ON florality_front_sessions_archive(started_at);

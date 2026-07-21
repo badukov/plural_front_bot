@@ -56,6 +56,7 @@ class Settings:
     florality_history_pull_interval_seconds: int
     florality_history_active_days: int
     florality_history_page_delay_seconds: float
+    front_history_active_days: int
 
 
 settings = Settings(
@@ -81,6 +82,7 @@ settings = Settings(
     florality_history_pull_interval_seconds=max(60, int(os.getenv("FLORALITY_HISTORY_PULL_INTERVAL_SECONDS", "900"))),
     florality_history_active_days=max(1, int(os.getenv("FLORALITY_HISTORY_ACTIVE_DAYS", "30"))),
     florality_history_page_delay_seconds=max(0.2, float(os.getenv("FLORALITY_HISTORY_PAGE_DELAY_SECONDS", "1.1"))),
+    front_history_active_days=max(1, int(os.getenv("FRONT_HISTORY_ACTIVE_DAYS", "30"))),
 )
 
 if not settings.bot_token:

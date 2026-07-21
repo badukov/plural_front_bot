@@ -38,10 +38,7 @@ async def show_statistics_command(message: Message) -> None:
     parts = (message.text or "").split(maxsplit=1)
     argument = parts[1].strip().casefold() if len(parts) > 1 else "30"
     if argument in {"all", "все", "всё"}:
-        if await repo.count_florality_front_sessions():
-            stats = await repo.get_florality_front_statistics(days=None)
-        else:
-            stats = await repo.get_front_statistics(days=30)
+        stats = await repo.get_front_statistics(days=None)
     else:
         try:
             days = int(argument)

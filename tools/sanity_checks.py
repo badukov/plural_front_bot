@@ -468,6 +468,28 @@ async def main() -> None:
 
         now_ms = int(time.time() * 1000)
         day_ms = 24 * 60 * 60 * 1000
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute("UPDATE front_history SET created_at=?", (now_ms - 40 * day_ms,))
+        con.commit()
+        con.close()
+        await temp_repo.record_current_front_history("recent_front_snapshot", created_by=None)
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        cur.execute("SELECT COUNT(*) FROM front_history")
+        active_history_count = int(cur.fetchone()[0])
+        cur.execute("SELECT COUNT(*) FROM front_history_archive")
+        archived_history_count = int(cur.fetchone()[0])
+        con.close()
+        _check("bot history older than 30 days should leave the active table", active_history_count == 1)
+        _check("old bot history should remain in the archive table", archived_history_count == 1)
+        internal_recent_stats = await temp_repo.get_front_statistics(days=30)
+        internal_all_stats = await temp_repo.get_front_statistics(days=None)
+        _check("internal bot stats should use front durations", internal_recent_stats["duration_based"] is True)
+        _check("internal 30-day stats should use the archived baseline", internal_recent_stats["total_duration_ms"] >= 29 * day_ms)
+        _check("continuous front state should count as one session", internal_recent_stats["total_front_appearances"] == 1)
+        _check("all-time internal stats should read archived snapshots", internal_all_stats["changes"] == 2)
+
         sessions = [
             {
                 "session_id": "old-session",
@@ -706,10 +728,13 @@ async def main() -> None:
         external_ids_exists = cur.fetchone() is not None
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='front_history'")
         front_history_exists = cur.fetchone() is not None
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='front_history_archive'")
+        front_history_archive_exists = cur.fetchone() is not None
         con.close()
         _check("users migration should add language_code", "language_code" in user_columns)
         _check("init should create external id mappings table", external_ids_exists)
         _check("init should create front history table", front_history_exists)
+        _check("init should create front history archive table", front_history_archive_exists)
 
     print("Sanity checks passed.")
     print(
