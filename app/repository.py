@@ -596,6 +596,79 @@ class Repository:
             )
         return result
 
+    async def get_front_sessions(self, limit: int = 20) -> list[dict[str, Any]]:
+        if await self.count_florality_front_sessions():
+            async with self._connect() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT session_id, remote_member_id AS member_id, member_name,
+                           started_at, ended_at
+                    FROM (
+                        SELECT session_id, remote_member_id, member_name, started_at, ended_at
+                        FROM florality_front_sessions
+                        UNION ALL
+                        SELECT session_id, remote_member_id, member_name, started_at, ended_at
+                        FROM florality_front_sessions_archive
+                    )
+                    ORDER BY started_at DESC, session_id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+                return [dict(row) for row in await cursor.fetchall()]
+
+        async with self._connect() as db:
+            cursor = await db.execute(
+                """
+                SELECT id, created_at, snapshot_json_z
+                FROM (
+                    SELECT id, created_at, snapshot_json_z FROM front_history
+                    UNION ALL
+                    SELECT id, created_at, snapshot_json_z FROM front_history_archive
+                )
+                ORDER BY created_at ASC, id ASC
+                """
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+
+        sessions: list[dict[str, Any]] = []
+        open_sessions: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                snapshot = _unpack_json(row["snapshot_json_z"])
+            except Exception:
+                snapshot = {"members": []}
+            members = snapshot.get("members") if isinstance(snapshot, dict) else []
+            current: dict[str, str] = {}
+            for member in members or []:
+                if not isinstance(member, dict):
+                    continue
+                name = str(member.get("name") or "").strip()
+                member_id = str(member.get("id") or name)
+                if name and member_id:
+                    current[member_id] = name
+
+            changed_at = int(row["created_at"])
+            for member_id in set(open_sessions) - set(current):
+                session = open_sessions.pop(member_id)
+                session["ended_at"] = changed_at
+                sessions.append(session)
+            for member_id, name in current.items():
+                if member_id in open_sessions:
+                    open_sessions[member_id]["member_name"] = name
+                    continue
+                open_sessions[member_id] = {
+                    "session_id": f"bot:{row['id']}:{member_id}",
+                    "member_id": member_id,
+                    "member_name": name,
+                    "started_at": changed_at,
+                    "ended_at": None,
+                }
+
+        sessions.extend(open_sessions.values())
+        sessions.sort(key=lambda row: (int(row["started_at"]), str(row["session_id"])), reverse=True)
+        return sessions[:limit]
+
     async def get_sync_state(self, key: str) -> str | None:
         async with self._connect() as db:
             cursor = await db.execute("SELECT value FROM sync_state WHERE key=?", (key,))

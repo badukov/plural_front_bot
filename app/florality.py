@@ -252,7 +252,14 @@ class FloralityClient:
             if cursor:
                 params["cursorStartedAt"] = cursor["startedAt"]
                 params["cursorId"] = cursor["id"]
-            data = await self._request("GET", f"/front/history?{urlencode(params)}")
+            path = f"/front/history?{urlencode(params)}"
+            data: Any = None
+            for attempt in range(1, 4):
+                data = await self._request("GET", path)
+                if isinstance(data, dict) and isinstance(data.get("items"), list):
+                    break
+                if attempt < 3:
+                    await asyncio.sleep(attempt * 2)
             if not isinstance(data, dict) or not isinstance(data.get("items"), list):
                 return None
             items.extend(item for item in data["items"] if isinstance(item, dict))
@@ -994,6 +1001,7 @@ async def run_florality_front_pull(bot: Bot) -> None:
                     front_members,
                     lang,
                 ),
+                photo_members=front_members,
             )
 
 

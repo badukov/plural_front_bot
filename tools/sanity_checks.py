@@ -37,6 +37,7 @@ from app.keyboards import (
     member_button_items,
     members_choice_keyboard,
 )
+from app.media import member_photo
 from app.repository import RU_TO_EN_KEYBOARD, Repository, _cyrillic_to_latin, member_reference, repo
 from app.reminders import MOSCOW_TIMEZONE, next_admin_front_reminder_at
 
@@ -363,6 +364,10 @@ async def main() -> None:
         _check("member avatar update should succeed", avatar_updated)
         _check("member avatar update should persist database path", member_with_avatar["avatar_url"] == avatar_path)
         _check("member avatar update should persist export metadata", avatar_raw.get("avatarUrl") == avatar_path)
+        _check(
+            "remote avatar should resolve for Telegram",
+            member_photo({"avatar_url": "https://example.com/avatar.jpg"}) == "https://example.com/avatar.jpg",
+        )
 
         missing_links = await temp_repo.get_missing_member_group_links(
             [(member["id"], "year2026"), (member["id"], "roles")]
@@ -455,8 +460,10 @@ async def main() -> None:
         history_rows = await temp_repo.get_front_history(limit=5)
         _check("front history should store compressed snapshots", len(history_rows) == 1)
         _check("front history should restore snapshot members", history_rows[0]["members"][0]["id"] == member["id"])
-        history_text = format_front_history(history_rows)
-        _check("front history should use formatted Telegram time", '<tg-time unix="' in history_text and 'format="dt"' in history_text)
+        history_sessions = await temp_repo.get_front_sessions(limit=5)
+        history_text = format_front_history(history_sessions)
+        _check("front history should show member sessions", member["name"] in history_text)
+        _check("front history should show a local interval and duration", " – " in history_text and history_text.endswith("m"))
         _check("front history text should fit Telegram limit", all(len(chunk) <= 3900 for chunk in split_long_message(history_text)))
         stats = await temp_repo.get_front_statistics(days=30)
         _check("front statistics should count history rows", stats["changes"] == 1)
@@ -531,6 +538,10 @@ async def main() -> None:
         _check("30-day stats should omit archived old sessions", recent_stats["changes"] == 1)
         _check("all-time stats should include archived sessions", all_stats["changes"] == 2)
         _check("Florality stats should use session durations", recent_stats["duration_based"] is True)
+        florality_history = await temp_repo.get_front_sessions(limit=5)
+        florality_history_text = format_front_history(florality_history)
+        _check("Florality session history should show the member", member["name"] in florality_history_text)
+        _check("Florality session history should show edited duration", "1h 30m" in florality_history_text)
         archived_stats_text = format_front_statistics(all_stats)
         _check("all-time duration stats should render", "100.0%" in archived_stats_text)
         await temp_repo.set_sync_state("history-test", "complete")
